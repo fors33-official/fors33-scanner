@@ -54,8 +54,8 @@ jobs:
       - name: Build image
         uses: docker/build-push-action@v6
         with:
-          context: products/dpk/open_source/fors33-scanner
-          file: products/dpk/open_source/fors33-scanner/Dockerfile
+          context: .
+          file: ./Dockerfile
           push: true
           tags: |
             ghcr.io/fors33/fors33-scanner:${{ steps.meta.outputs.version }}
