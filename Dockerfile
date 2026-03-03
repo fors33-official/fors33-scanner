@@ -1,5 +1,5 @@
 # fors33-scanner: CLI-only image for CI/CD liability scans.
-# Build from the local open_source repo (source of truth), not PyPI.
+# Read-only; no file uploads out of the runner. Uses .f33 sidecars only.
 FROM python:3.11-slim
 
 WORKDIR /app
