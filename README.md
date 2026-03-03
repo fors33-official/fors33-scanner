@@ -17,11 +17,13 @@ LLM_CONTEXT — fors33-scanner
 <keywords>WORM, SEC 17a-4, ESIC, liability scanner, .f33 sidecar, data provenance, attestation coverage, cryptographic sealing, silent mutation risk.</keywords>
 -->
 
-High-speed liability scanner for attested vs unattested data using `.f33` sidecars.
+High-speed liability scanner for attested vs unattested data using cryptographic
+sidecars.
 
 The scanner walks one or more roots with `os.scandir`, measures data gravity (bytes),
 and classifies large files as **attested** or **unattested** based on the presence
-of a sibling `<filename>.f33` sidecar.
+of sibling sidecar files (including `.f33`, `.sig`, `.asc`, `.sha256`, `.sha512`,
+`.md5`, `.pem`).
 
 For machine-readable context (LLMs, crawlers), see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
@@ -58,8 +60,9 @@ Human-readable output is strictly technical and diagnostic:
 ```text
 [TOOLCHAIN]     : FORS33 Data Provenance Kit (DPK)
 [SCAN SUMMARY]  : Evaluated 14,205 files in 4.20s
-[ATTESTED]      : 12.4 GB (Signatures verified)
-[UNATTESTED]    : 4.2 TB (Signatures missing)
+[ATTESTED]      : 4.1 GB (External: .sig, .asc, .sha256, .sha512, .md5, .pem)
+[ATTESTED]      : 0.0 B  (FΦRS33 Deterministic Sidecars)
+[UNATTESTED]    : 2.1 TB (Signatures missing)
 
 [EXPOSURE RISK] : 99.7% volume exposed to silent mutation
 [SEVERITY]      : CRITICAL
@@ -69,7 +72,8 @@ Human-readable output is strictly technical and diagnostic:
 [REFERENCE]     : fors33.com | GitHub Marketplace: FORS33
 ```
 
-JSON output includes the same core fields plus exposure ratio and risk level:
+JSON output includes the same core fields plus exposure ratio and risk level. It
+also adds stratified attestation fields:
 
 ```json
 {
@@ -80,7 +84,11 @@ JSON output includes the same core fields plus exposure ratio and risk level:
   "unattested_files": 264,
   "total_bytes": 4724464025600,
   "attested_bytes": 13314398617,
-  "unattested_bytes": 471115, 
+  "unattested_bytes": 471115,
+  "attested_f33_files": 12,
+  "attested_external_files": 36,
+  "attested_f33_bytes": 3221225472,
+  "attested_external_bytes": 10093173145,
   "elapsed_seconds": 4.20,
   "exposure_ratio": 0.997,
   "risk_level": "CRITICAL"
@@ -91,17 +99,25 @@ JSON output includes the same core fields plus exposure ratio and risk level:
 
 - Read-only: the scanner does **not** modify files or sidecars.
 - O(1) with respect to file contents: it never reads file bytes, only metadata
-  and sibling `.f33` presence.
+  and sibling sidecar presence via in-memory filename sets.
 - Excludes common noise directories by default (`.git`, `node_modules`, `venv`,
   `.venv`, `__pycache__`, `.idea`, `.vscode`).
 
 ## Relationship to FΦRS33
 
-The scanner is designed to work with the FΦRS33 `.f33` sidecar standard:
-attested files have a detached, cryptographically signed sidecar
-`<target_name>.f33` written by the Data Provenance Kit.
+The scanner is designed to work with the FΦRS33 `.f33` sidecar standard while
+respecting existing cryptographic infrastructure (PGP/SHA sidecars).
 
-This tool quantifies how much of your data surface is covered by those sidecars.
+- **External / legacy attestation**: Files with recognized sidecars such as
+  `.sig`, `.asc`, `.sha256`, `.sha512`, `.md5`, `.pem` are counted as attested
+  external coverage.
+- **FΦRS33 deterministic attestation**: Files with a detached, cryptographically
+  signed `<target_name>.f33` sidecar are counted separately as FΦRS33
+  deterministic coverage.
+
+This tool quantifies how much of your data surface is covered by any cryptographic
+sidecar, and how much of that coverage has been upgraded to deterministic FΦRS33
+sidecars.
 
 ## License
 

@@ -29,6 +29,20 @@ _EXCLUDE_DIRS: Set[str] = {
     ".vscode",
 }
 
+# Recognized attestation sidecar extensions. .f33 is the deterministic FΦRS33
+# standard; the others are external/legacy formats we respect for coverage.
+_F33_EXT = ".f33"
+_ATT_EXTS = (
+    _F33_EXT,
+    ".sig",
+    ".asc",
+    ".sha256",
+    ".sha512",
+    ".md5",
+    ".pem",
+)
+_EXTERNAL_EXTS = tuple(ext for ext in _ATT_EXTS if ext != _F33_EXT)
+
 
 @dataclass
 class ScanStats:
@@ -40,6 +54,11 @@ class ScanStats:
     total_bytes: int = 0
     attested_bytes: int = 0
     unattested_bytes: int = 0
+    # Stratified attestation breakdown
+    attested_f33_files: int = 0
+    attested_external_files: int = 0
+    attested_f33_bytes: int = 0
+    attested_external_bytes: int = 0
     elapsed_seconds: float = 0.0
 
     @property
@@ -62,10 +81,17 @@ class ScanStats:
 
 def _scan_dir(path: str, threshold_bytes: int, stats: ScanStats) -> None:
     try:
+        # Never follow symlinks; stay within the intended tree and avoid loops.
         with os.scandir(path) as it:
             entries = list(it)
     except (PermissionError, FileNotFoundError, NotADirectoryError):
         return
+
+    # Build an in-memory set of filenames in this directory so we can check for
+    # potential sidecars in O(1) without extra disk I/O.
+    filenames = {
+        entry.name for entry in entries if entry.is_file(follow_symlinks=False)
+    }
 
     for entry in entries:
         name = entry.name
@@ -76,7 +102,7 @@ def _scan_dir(path: str, threshold_bytes: int, stats: ScanStats) -> None:
         elif entry.is_file(follow_symlinks=False):
             stats.files_scanned += 1
             # Skip sidecar files themselves; we classify their parents.
-            if name.endswith(".f33"):
+            if any(name.endswith(ext) for ext in _ATT_EXTS):
                 continue
             try:
                 st = entry.stat(follow_symlinks=False)
@@ -89,11 +115,24 @@ def _scan_dir(path: str, threshold_bytes: int, stats: ScanStats) -> None:
             stats.candidate_files += 1
             stats.total_bytes += size
 
-            sidecar_name = f"{name}.f33"
-            sidecar_path = os.path.join(path, sidecar_name)
-            if os.path.isfile(sidecar_path):
+            has_f33 = f"{name}{_F33_EXT}" in filenames
+            has_external = False
+            if not has_f33:
+                for ext in _EXTERNAL_EXTS:
+                    if f"{name}{ext}" in filenames:
+                        has_external = True
+                        break
+
+            if has_f33:
                 stats.attested_files += 1
                 stats.attested_bytes += size
+                stats.attested_f33_files += 1
+                stats.attested_f33_bytes += size
+            elif has_external:
+                stats.attested_files += 1
+                stats.attested_bytes += size
+                stats.attested_external_files += 1
+                stats.attested_external_bytes += size
             else:
                 stats.unattested_files += 1
                 stats.unattested_bytes += size
@@ -125,7 +164,8 @@ def _format_bytes(num_bytes: int) -> str:
 def print_human_report(stats: ScanStats) -> None:
     files = stats.files_scanned
     secs = stats.elapsed_seconds or 0.0
-    data_attested = _format_bytes(stats.attested_bytes)
+    data_external = _format_bytes(stats.attested_external_bytes)
+    data_f33 = _format_bytes(stats.attested_f33_bytes)
     data_unattested = _format_bytes(stats.unattested_bytes)
 
     exposure_pct = stats.exposure_ratio * 100.0 if stats.total_bytes > 0 else 0.0
@@ -133,7 +173,13 @@ def print_human_report(stats: ScanStats) -> None:
 
     print(f"[TOOLCHAIN]     : FORS33 Data Provenance Kit (DPK)")
     print(f"[SCAN SUMMARY]  : Evaluated {files:,} files in {secs:.2f}s")
-    print(f"[ATTESTED]      : {data_attested} (Signatures verified)")
+    print(
+        "[ATTESTED]      : "
+        f"{data_external} (External: .sig, .asc, .sha256, .sha512, .md5, .pem)"
+    )
+    print(
+        f"[ATTESTED]      : {data_f33} (FΦRS33 Deterministic Sidecars)"
+    )
     print(f"[UNATTESTED]    : {data_unattested} (Signatures missing)")
     print()
     print(f"[EXPOSURE RISK] : {exposure_pct:.1f}% volume exposed to silent mutation")
