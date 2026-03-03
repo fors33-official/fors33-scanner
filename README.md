@@ -1,6 +1,6 @@
 # fors33-scanner
 
-[![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/ci.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/build-push-fors33-scanner-docker.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
