@@ -1,0 +1,34 @@
+name: 'FORS33 Data Liability Scanner'
+description: 'Quantify attested vs unattested data bytes using .f33 sidecars. Read-only, zero network calls.'
+branding:
+  icon: alert-triangle
+  color: orange
+inputs:
+  root:
+    description: 'Root directory to scan (default: ${{ github.workspace }})'
+    required: false
+  threshold-mb:
+    description: 'Minimum file size in MB to include in liability accounting (default: 1.0)'
+    required: false
+  json:
+    description: 'If "true", emit JSON summary instead of human-readable output'
+    required: false
+runs:
+  using: 'docker'
+  image: 'docker://ghcr.io/fors33/fors33-scanner:latest'
+  args:
+    - ${{ inputs.root }}
+    - ${{ inputs.threshold-mb }}
+*** End Patch***"}]}/>
+
+
+
+{"tool_uses":[{"recipient_name":"functions.TodoWrite","parameters":{"todos":[{"id":"dpk-open-realign","content":"Realign rules/docs for open_source verifier+scanner","status":"completed"}],"merge":true}},{"recipient_name":"functions.ReadLints","parameters":{"paths":["c:\\Users\\jahar\\Documents\\FORS33\\products\\dpk\\open_source\\fors33-scanner\\scan_dpk.py"]}}]}/>
+
+
+
+{"tool_uses":[{"recipient_name":"functions.ApplyPatch","parameters":"*** Begin Patch\n*** Update File: c:\\Users\\jahar\\Documents\\FORS33\\products\\dpk\\open_source\\fors33-scanner\\action.yml\n@@\n-runs:\n-  using: 'docker'\n-  image: 'docker://ghcr.io/fors33/fors33-scanner:latest'\n-  args:\n-    - ${{ inputs.root }}\n-    - ${{ inputs.threshold-mb }}\n+runs:\n+  using: 'docker'\n+  image: 'docker://ghcr.io/fors33/fors33-scanner:latest'\n+  args:\n+    - ${{ inputs.root }}\n+    - ${{ inputs.threshold-mb }}\n*** End Patch"}]} />
+
+
+
+{"tool_uses":[{"recipient_name":"functions.TodoWrite","parameters":{"todos":[{"id":"dpk-open-realign","content":"Realign rules/docs for open_source verifier+scanner","status":"completed"}],"merge":true}},{"recipient_name":"functions.ReadLints","parameters":{"paths":["c:\\Users\\jahar\\Documents\\FORS33\\products\\dpk\\open_source\\fors33-scanner\\scan_dpk.py"]}}]} -->
