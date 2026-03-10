@@ -18,12 +18,12 @@ LLM_CONTEXT — fors33-scanner
 -->
 
 High-speed liability scanner for attested vs unattested data using cryptographic
-sidecars.
+sidecars, with optional baseline generation for downstream verifiers.
 
-The scanner walks one or more roots with `os.scandir`, measures data gravity (bytes),
-and classifies large files as **attested** or **unattested** based on the presence
-of sibling sidecar files (including `.f33`, `.sig`, `.asc`, `.sha256`, `.sha512`,
-`.md5`, `.pem`).
+The scanner walks one or more roots, measures data gravity (bytes), and classifies
+large files as **attested** or **unattested** based on sibling sidecar files
+(including `.f33`, `.sig`, `.asc`, `.sha256`, `.sha512`, `.md5`, `.pem`). It can
+emit sha256sum-style, CSV, or JSON baselines for use with `fors33-verifier` manifest mode.
 
 For machine-readable context (LLMs, crawlers), see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
@@ -51,6 +51,24 @@ Emit JSON instead of human-readable output (for CI, Datadog, Splunk, etc.):
 
 ```bash
 fors33-scanner --root /data --json
+```
+
+Generate a sha256sum-style baseline for downstream verification:
+
+```bash
+fors33-scanner --root /data --emit-sha256sum fors33_baseline.sha256
+```
+
+Emit CSV baseline (`path,algo,digest,bytes,last_modified`):
+
+```bash
+fors33-scanner --root /data --emit-csv fors33_baseline.csv
+```
+
+Emit JSON baseline manifest (compatible with fors33-verifier):
+
+```bash
+fors33-scanner --root /data --emit-json fors33_baseline.json
 ```
 
 ## Output
@@ -98,10 +116,12 @@ also adds stratified attestation fields:
 ## Safety and scope
 
 - Read-only: the scanner does **not** modify files or sidecars.
-- O(1) with respect to file contents: it never reads file bytes, only metadata
-  and sibling sidecar presence via in-memory filename sets.
+- Scan-only use: O(1) with respect to file contents; reads only metadata and
+  sibling sidecar presence. Baseline generation (`--emit-*`) uses streaming
+  chunked hashing when hashing is required.
 - Excludes common noise directories by default (`.git`, `node_modules`, `venv`,
-  `.venv`, `__pycache__`, `.idea`, `.vscode`).
+  `.venv`, `__pycache__`, `.idea`, `.vscode`). Respects root-level `.f33ignore`
+  and CLI `--ignore-pattern` / `--exclude-dir`.
 
 ## Relationship to FΦRS33
 
@@ -118,6 +138,10 @@ respecting existing cryptographic infrastructure (PGP/SHA sidecars).
 This tool quantifies how much of your data surface is covered by any cryptographic
 sidecar, and how much of that coverage has been upgraded to deterministic FΦRS33
 sidecars.
+
+## Requirements
+
+Python 3.9–3.12. Standard library only for scan-only use. Optional `blake3` for baseline generation. Platforms: Linux, macOS, Windows.
 
 ## License
 

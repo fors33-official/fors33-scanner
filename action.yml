@@ -19,16 +19,4 @@ runs:
   args:
     - ${{ inputs.root }}
     - ${{ inputs.threshold-mb }}
-*** End Patch***"}]}/>
-
-
-
-{"tool_uses":[{"recipient_name":"functions.TodoWrite","parameters":{"todos":[{"id":"dpk-open-realign","content":"Realign rules/docs for open_source verifier+scanner","status":"completed"}],"merge":true}},{"recipient_name":"functions.ReadLints","parameters":{"paths":["c:\\Users\\jahar\\Documents\\FORS33\\products\\dpk\\open_source\\fors33-scanner\\scan_dpk.py"]}}]}/>
-
-
-
-{"tool_uses":[{"recipient_name":"functions.ApplyPatch","parameters":"*** Begin Patch\n*** Update File: c:\\Users\\jahar\\Documents\\FORS33\\products\\dpk\\open_source\\fors33-scanner\\action.yml\n@@\n-runs:\n-  using: 'docker'\n-  image: 'docker://ghcr.io/fors33/fors33-scanner:latest'\n-  args:\n-    - ${{ inputs.root }}\n-    - ${{ inputs.threshold-mb }}\n+runs:\n+  using: 'docker'\n+  image: 'docker://ghcr.io/fors33/fors33-scanner:latest'\n+  args:\n+    - ${{ inputs.root }}\n+    - ${{ inputs.threshold-mb }}\n*** End Patch"}]} />
-
-
-
-{"tool_uses":[{"recipient_name":"functions.TodoWrite","parameters":{"todos":[{"id":"dpk-open-realign","content":"Realign rules/docs for open_source verifier+scanner","status":"completed"}],"merge":true}},{"recipient_name":"functions.ReadLints","parameters":{"paths":["c:\\Users\\jahar\\Documents\\FORS33\\products\\dpk\\open_source\\fors33-scanner\\scan_dpk.py"]}}]} -->
+    - ${{ inputs.json }}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fors33-scanner"
-version = "0.1.0"
+version = "0.2.0"
 description = "High-speed liability scanner for attested vs unattested data using .f33 sidecars."
 readme = "README.md"
 license = "MIT"
@@ -12,6 +12,7 @@ requires-python = ">=3.9"
 authors = [{name = "FORS33"}]
 keywords = ["scanner", "security", "data-provenance", "attestation", "compliance"]
 classifiers = [
+    "License :: OSI Approved :: MIT License",
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
@@ -30,5 +31,5 @@ fors33-scanner = "scan_dpk:main"
 include = []
 
 [tool.setuptools]
-py-modules = ["scan_dpk"]
+py-modules = ["scan_dpk", "hash_core"]
 

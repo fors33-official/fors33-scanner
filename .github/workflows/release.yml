@@ -1,0 +1,84 @@
+# Release: Nuitka binary build + artifact smoke test. Triggered by version tag only.
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+jobs:
+  build-nuitka-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Nuitka and deps
+        run: |
+          pip install nuitka ordered-set
+          pip install .
+      - name: Build Nuitka standalone
+        run: |
+          python -m nuitka --standalone --onefile --output-filename=fors33-scanner.bin \
+            --nofollow-import-to=pytest --nofollow-import-to=build --nofollow-import-to=twine \
+            scan_dpk.py
+      - name: Artifact smoke test — --help
+        run: chmod +x fors33-scanner.bin && ./fors33-scanner.bin --help
+      - name: Artifact smoke test — one real command
+        run: ./fors33-scanner.bin --root . 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fors33-scanner-linux
+          path: fors33-scanner.bin
+
+  build-nuitka-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Nuitka and deps
+        run: pip install nuitka ordered-set
+        shell: bash
+      - name: Install package
+        run: pip install .
+        shell: bash
+      - name: Build Nuitka standalone
+        run: python -m nuitka --standalone --onefile --output-filename=fors33-scanner.exe --nofollow-import-to=pytest --nofollow-import-to=build --nofollow-import-to=twine scan_dpk.py
+        shell: bash
+      - name: Artifact smoke test — --help
+        run: ./fors33-scanner.exe --help
+        shell: bash
+      - name: Artifact smoke test — one real command
+        run: ./fors33-scanner.exe --root . 2>&1 || true
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fors33-scanner-windows
+          path: fors33-scanner.exe
+
+  build-nuitka-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Nuitka and deps
+        run: |
+          pip install nuitka ordered-set
+          pip install .
+      - name: Build Nuitka standalone
+        run: |
+          python -m nuitka --standalone --onefile --output-filename=fors33-scanner.bin \
+            --nofollow-import-to=pytest --nofollow-import-to=build --nofollow-import-to=twine \
+            scan_dpk.py
+      - name: Artifact smoke test — --help
+        run: chmod +x fors33-scanner.bin && ./fors33-scanner.bin --help
+      - name: Artifact smoke test — one real command
+        run: ./fors33-scanner.bin --root . 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fors33-scanner-macos
+          path: fors33-scanner.bin

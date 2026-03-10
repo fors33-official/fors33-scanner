@@ -7,6 +7,9 @@ COPY . /app
 
 RUN pip install --no-cache-dir .
 
-ENTRYPOINT ["fors33-scanner"]
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--help"]
 
