@@ -19,12 +19,18 @@ import os
 import sys
 import time
 from dataclasses import dataclass, asdict
-from typing import Dict, Iterable, List, Set
+from typing import Callable, Dict, Iterable, List, Set
 
 try:
-    from .hash_core import hash_file
+    from .hash_core import hash_file, path_for_kernel, path_from_kernel
 except ImportError:  # pragma: no cover - flat layout
-    from hash_core import hash_file
+    from hash_core import hash_file, path_for_kernel, path_from_kernel
+
+
+def _env_bool(key: str) -> bool:
+    """Strict string-to-bool: True only for 1, true, yes, y; False otherwise."""
+    v = os.environ.get(key, "").strip().lower()
+    return v in ("1", "true", "yes", "y")
 
 
 _EXCLUDE_DIRS: Set[str] = {
@@ -50,6 +56,18 @@ _ATT_EXTS = (
     ".pem",
 )
 _EXTERNAL_EXTS = tuple(ext for ext in _ATT_EXTS if ext != _F33_EXT)
+
+
+@dataclass
+class BaselineRecord:
+    """Unified record shape for Data Latch UI: path, digest, algo, bytes, mtime, status."""
+
+    path: str
+    digest: str
+    algo: str
+    bytes: int
+    mtime: int | float
+    status: str = "baseline"
 
 
 @dataclass
@@ -107,6 +125,23 @@ def _load_f33ignore_patterns(root: str) -> List[str]:
     return patterns
 
 
+def _strip_mount_prefix(path: str, prefix: str) -> str:
+    """Strip Docker host-mount prefix from path for stored/logged/JSON output."""
+    if not prefix:
+        return path
+    norm_path = os.path.normpath(path)
+    norm_prefix = os.path.normpath(prefix).rstrip(os.sep)
+    if not norm_prefix:
+        return path
+    if norm_path == norm_prefix:
+        return "."
+    sep = os.sep
+    if norm_path.startswith(norm_prefix + sep):
+        stripped = norm_path[len(norm_prefix) + len(sep) :]
+        return stripped if stripped else "."
+    return path
+
+
 def _matches_ignore(rel_path: str, patterns: List[str]) -> bool:
     if not patterns:
         return False
@@ -127,9 +162,10 @@ def _scan_dir(
     extra_exclude_dirs: Set[str],
     follow_symlinks: bool,
     visited_dirs: Set[tuple[int, int]],
+    visited_files: Set[tuple[int, int]] | None = None,
 ) -> None:
     try:
-        st_dir = os.stat(path, follow_symlinks=False)
+        st_dir = os.stat(path_for_kernel(path), follow_symlinks=False)
     except OSError:
         return
 
@@ -139,7 +175,7 @@ def _scan_dir(
         return
     visited_dirs.add(key)
     try:
-        with os.scandir(path) as it:
+        with os.scandir(path_for_kernel(path)) as it:
             entries = list(it)
     except (PermissionError, FileNotFoundError, NotADirectoryError, OSError):
         # Entire directory is unreadable; treat contents as skipped.
@@ -157,7 +193,7 @@ def _scan_dir(
         if entry.is_dir(follow_symlinks=follow_symlinks):
             if name in _EXCLUDE_DIRS or name in extra_exclude_dirs:
                 continue
-            rel_dir = os.path.relpath(entry_path, root)
+            rel_dir = os.path.relpath(path_from_kernel(entry_path), path_from_kernel(root))
             if _matches_ignore(rel_dir, ignore_patterns):
                 continue
             _scan_dir(
@@ -169,13 +205,14 @@ def _scan_dir(
                 extra_exclude_dirs,
                 follow_symlinks,
                 visited_dirs,
+                visited_files,
             )
         elif entry.is_file(follow_symlinks=follow_symlinks):
             stats.files_scanned += 1
             # Skip sidecar files themselves; we classify their parents.
             if any(name.endswith(ext) for ext in _ATT_EXTS):
                 continue
-            rel_path = os.path.relpath(entry_path, root)
+            rel_path = os.path.relpath(path_from_kernel(entry_path), path_from_kernel(root))
             if _matches_ignore(rel_path, ignore_patterns):
                 continue
             try:
@@ -183,6 +220,11 @@ def _scan_dir(
             except OSError:
                 stats.skipped_files += 1
                 continue
+            if follow_symlinks and visited_files is not None and st.st_ino != 0:
+                file_key = (st.st_dev, st.st_ino)
+                if file_key in visited_files:
+                    continue
+                visited_files.add(file_key)
             size = st.st_size
             if size < threshold_bytes:
                 continue
@@ -240,6 +282,7 @@ def scan_roots(
             extra_exclude_dirs,
             follow_symlinks,
             visited_dirs,
+            set() if follow_symlinks else None,
         )
 
     stats.elapsed_seconds = time.time() - start
@@ -262,12 +305,14 @@ def _walk_and_collect(
     root_abs = os.path.abspath(root)
     stats = ScanStats(roots=[root_abs])
     visited_dirs: Set[tuple[int, int]] = set()
+    visited_files: Set[tuple[int, int]] = set()
     candidates: List[tuple[str, str, int, float]] = []
     start = time.time()
+    walk_root = path_for_kernel(root_abs)
 
-    for dirpath, dirnames, filenames in os.walk(root_abs, followlinks=follow_symlinks):
+    for dirpath, dirnames, filenames in os.walk(walk_root, followlinks=follow_symlinks):
         try:
-            st_dir = os.stat(dirpath, follow_symlinks=False)
+            st_dir = os.stat(path_for_kernel(dirpath), follow_symlinks=False)
         except OSError:
             continue
         key = (st_dir.st_dev, st_dir.st_ino)
@@ -282,16 +327,21 @@ def _walk_and_collect(
             if any(name.endswith(ext) for ext in _ATT_EXTS):
                 continue
             full_path = os.path.join(dirpath, name)
-            rel_path = os.path.relpath(full_path, root_abs)
+            rel_path = os.path.relpath(path_from_kernel(full_path), path_from_kernel(root_abs))
             norm_rel = rel_path.replace("\\", "/")
             if ignore_patterns and _matches_ignore(norm_rel, ignore_patterns):
                 continue
             stats.files_scanned += 1
             try:
-                st = os.stat(full_path, follow_symlinks=follow_symlinks)
+                st = os.stat(path_for_kernel(full_path), follow_symlinks=follow_symlinks)
             except OSError:
                 stats.skipped_files += 1
                 continue
+            if follow_symlinks and st.st_ino != 0:
+                file_key = (st.st_dev, st.st_ino)
+                if file_key in visited_files:
+                    continue
+                visited_files.add(file_key)
             size = st.st_size
             if size < threshold_bytes:
                 continue
@@ -325,18 +375,48 @@ def _hash_candidates(
     algo: str,
     follow_symlinks: bool,
     stats: ScanStats,
+    progress_event_callback: Callable[[dict], None] | None = None,
 ) -> List[Dict[str, object]]:
-    """Hash candidate files and return baseline records; update stats.skipped_files and mutated_during_scan."""
+    """Hash candidate files (single root) and return baseline records."""
+    root_indexed = [(0, rel, fp, sz, mt) for rel, fp, sz, mt in candidates]
+    return _hash_candidates_multi(
+        root_indexed, algo, follow_symlinks, stats, progress_event_callback
+    )
+
+
+def _hash_candidates_multi(
+    candidates: List[tuple[int, str, str, int, float]],
+    algo: str,
+    follow_symlinks: bool,
+    stats: ScanStats,
+    progress_event_callback: Callable[[dict], None] | None = None,
+) -> List[Dict[str, object]]:
+    """Hash candidate files (multi-root) and return baseline records; update stats.skipped_files and mutated_during_scan."""
     from concurrent.futures import ThreadPoolExecutor
 
     records: List[Dict[str, object]] = []
     max_workers = min(32, (os.cpu_count() or 1) + 4)
 
-    def _worker(item: tuple[str, str, int, float]):
-        rel, full_path, size, mtime_before = item
+    def _worker(item: tuple[int, str, str, int, float]):
+        root_idx, rel, full_path, size, _mtime = item
         try:
+            st_before = os.stat(path_for_kernel(full_path), follow_symlinks=follow_symlinks)
+            before_key: int | tuple[int, int] = (
+                (st_before.st_dev, st_before.st_ino)
+                if st_before.st_ino != 0
+                else int(st_before.st_mtime)
+            )
             progress_cb = None
-            if size >= 500 * 1024 * 1024 and sys.stderr.isatty():
+            if progress_event_callback is not None:
+                def _progress_headless(br: int, tb: int) -> None:
+                    if tb > 0:
+                        pct = min(100, int(br * 100 / tb))
+                        progress_event_callback(
+                            {"event": "progress", "file": rel, "pct": pct}
+                        )
+
+                progress_cb = _progress_headless
+            elif size >= 500 * 1024 * 1024 and sys.stderr.isatty():
                 last_pct = [0]
 
                 def _progress(br: int, tb: int) -> None:
@@ -344,37 +424,52 @@ def _hash_candidates(
                         pct = min(100, int(br * 100 / tb))
                         if pct != last_pct[0] and (pct % 5 == 0 or pct == 100):
                             last_pct[0] = pct
-                            print(f"\r[SCAN] Hashing {rel}: {pct}%", end="", file=sys.stderr)
+                            print(f"\r\033[K[SCAN] Hashing {rel}: {pct}%", end="", file=sys.stderr)
 
                 progress_cb = _progress
             digest = hash_file(full_path, algo=algo, progress_callback=progress_cb)
             if progress_cb and sys.stderr.isatty():
                 print(file=sys.stderr)
-            mtime_after = os.stat(full_path, follow_symlinks=follow_symlinks).st_mtime
+            st_after = os.stat(path_for_kernel(full_path), follow_symlinks=follow_symlinks)
+            after_key: int | tuple[int, int] = (
+                (st_after.st_dev, st_after.st_ino)
+                if st_after.st_ino != 0
+                else int(st_after.st_mtime)
+            )
+            mutated = before_key != after_key
+            mtime_final = st_after.st_mtime
         except Exception as e:
             print(f"[ERROR] Unhandled worker exception: {e}", file=sys.stderr)
-            return (rel, size, mtime_before, None, True, False)
-        mutated = mtime_before != mtime_after
-        return (rel, size, mtime_after, digest, False, mutated)
+            return (root_idx, rel, size, 0.0, None, True, False)
+        return (root_idx, rel, size, mtime_final, digest, False, mutated)
 
-    for rel, size, mtime_final, digest, skipped, mutated in ThreadPoolExecutor(
-        max_workers=max_workers
-    ).map(_worker, candidates):
-        if skipped:
-            stats.skipped_files += 1
-            continue
-        if mutated:
-            stats.mutated_during_scan += 1
-            continue
-        records.append(
-            {
-                "path": rel,
-                "algo": algo,
-                "digest": digest.lower(),
-                "bytes": size,
-                "mtime": int(mtime_final),
-            }
-        )
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        for root_idx, rel, size, mtime_final, digest, skipped, mutated in executor.map(
+            _worker, candidates
+        ):
+            if skipped:
+                stats.skipped_files += 1
+                continue
+            if mutated:
+                stats.mutated_during_scan += 1
+                continue
+            records.append(
+                {
+                    "path": rel,
+                    "algo": algo,
+                    "digest": digest.lower(),
+                    "bytes": size,
+                    "mtime": int(mtime_final),
+                    "root_index": root_idx,
+                    "status": "baseline",
+                }
+            )
+    except KeyboardInterrupt:
+        executor.shutdown(wait=False, cancel_futures=True)
+        sys.exit(130)
+    finally:
+        executor.shutdown(wait=True)
     return records
 
 
@@ -410,15 +505,83 @@ def _compute_baseline(
         stats.attested_external_bytes = walk_stats.attested_external_bytes
         stats.skipped_files = walk_stats.skipped_files
         stats.elapsed_seconds = walk_stats.elapsed_seconds
-        return _hash_candidates(candidates, algo, follow_symlinks, stats)
+        return _hash_candidates(
+            candidates, algo, follow_symlinks, stats, progress_event_callback=None
+        )
     stats_placeholder = ScanStats(roots=[os.path.abspath(root)])
     _, candidates = _walk_and_collect(
         root, threshold_bytes, ignore_list, extra_exclude, follow_symlinks
     )
-    return _hash_candidates(candidates, algo, follow_symlinks, stats_placeholder)
+    return _hash_candidates(
+        candidates, algo, follow_symlinks, stats_placeholder, progress_event_callback=None
+    )
 
 
-def _write_shasum(records: List[Dict[str, object]], dest) -> None:
+def execute_scan(
+    roots: List[str],
+    threshold_mb: float = 1.0,
+    ignore_patterns: List[str] | None = None,
+    exclude_dirs: List[str] | None = None,
+    follow_symlinks: bool = False,
+    algo: str = "sha256",
+    wants_baseline: bool = False,
+    progress_event_callback: Callable[[dict], None] | None = None,
+    strip_mount_prefix: str = "",
+) -> tuple[ScanStats, List[Dict[str, object]]]:
+    """
+    Library entry point: scan roots and optionally compute baseline.
+
+    Returns (ScanStats, records). Records are baseline entries when wants_baseline
+    is True; otherwise empty. When progress_event_callback is set, emits JSON
+    progress events like {"event":"progress","file":"rel/path","pct":45} for
+    headless/WebSocket streaming.
+    """
+    roots_abs = [os.path.abspath(r) for r in roots]
+    threshold_bytes = int(threshold_mb * 1024 * 1024)
+    base_ignore = list(ignore_patterns or [])
+    exclude_set = set(exclude_dirs or [])
+
+    if wants_baseline:
+        all_candidates: List[tuple[int, str, str, int, float]] = []
+        stats = ScanStats(roots=roots_abs)
+        baseline_start = time.time()
+        for root_idx, root in enumerate(roots_abs):
+            root_ignore = base_ignore + _load_f33ignore_patterns(root)
+            walk_stats, candidates = _walk_and_collect(
+                root, threshold_bytes, root_ignore, exclude_set, follow_symlinks
+            )
+            stats.files_scanned += walk_stats.files_scanned
+            stats.candidate_files += walk_stats.candidate_files
+            stats.total_bytes += walk_stats.total_bytes
+            stats.attested_files += walk_stats.attested_files
+            stats.attested_bytes += walk_stats.attested_bytes
+            stats.unattested_files += walk_stats.unattested_files
+            stats.unattested_bytes += walk_stats.unattested_bytes
+            stats.attested_f33_files += walk_stats.attested_f33_files
+            stats.attested_f33_bytes += walk_stats.attested_f33_bytes
+            stats.attested_external_files += walk_stats.attested_external_files
+            stats.attested_external_bytes += walk_stats.attested_external_bytes
+            stats.skipped_files += walk_stats.skipped_files
+            for norm_rel, full_path, size, mtime in candidates:
+                all_candidates.append((root_idx, norm_rel, full_path, size, mtime))
+        stats.elapsed_seconds = time.time() - baseline_start
+        records = _hash_candidates_multi(
+            all_candidates, algo, follow_symlinks, stats, progress_event_callback
+        )
+    else:
+        stats = scan_roots(
+            roots_abs,
+            threshold_mb,
+            ignore_patterns=base_ignore,
+            exclude_dirs=exclude_set,
+            follow_symlinks=follow_symlinks,
+        )
+        records = []
+    return stats, records
+
+
+def _write_checksums(records: List[Dict[str, object]], dest) -> None:
+    """Write Hash Filename format (standard checksum text): digest  path."""
     for rec in records:
         dest.write(f"{rec['digest']}  {rec['path']}\n")
 
@@ -440,24 +603,27 @@ def _write_csv(records: List[Dict[str, object]], dest) -> None:
 
 def _write_json_baseline(
     records: List[Dict[str, object]],
-    root: str,
+    roots: List[str],
     algo: str,
     dest,
     stats: ScanStats | None = None,
+    strip_mount_prefix: str = "",
 ) -> None:
     file_count = len(records)
     total_bytes = sum(r.get("bytes", 0) for r in records)
-    payload = {
-        "schema_version": "0.2",
-        "root": os.path.abspath(root),
-        "algo": algo,
-        "files": records,
-        "summary": {
-            "file_count": file_count,
-            "total_bytes": total_bytes,
-            "skipped_files": (stats.skipped_files if stats else 0),
-            "mutated_during_scan": (stats.mutated_during_scan if stats else 0),
-        },
+    roots_abs = [os.path.abspath(r) for r in roots]
+    if strip_mount_prefix:
+        roots_abs = [_strip_mount_prefix(r, strip_mount_prefix) for r in roots_abs]
+    if len(roots_abs) == 1:
+        payload = {"schema_version": "0.2", "root": roots_abs[0], "algo": algo}
+    else:
+        payload = {"schema_version": "0.2", "roots": roots_abs, "algo": algo}
+    payload["files"] = records
+    payload["summary"] = {
+        "file_count": file_count,
+        "total_bytes": total_bytes,
+        "skipped_files": (stats.skipped_files if stats else 0),
+        "mutated_during_scan": (stats.mutated_during_scan if stats else 0),
     }
     json.dump(payload, dest)
 
@@ -472,26 +638,25 @@ def _format_bytes(num_bytes: int) -> str:
     return f"{value:.1f} TB"
 
 
-def print_human_report(stats: ScanStats) -> None:
+def print_human_report(stats: ScanStats, compliance_report: bool = False) -> None:
     files = stats.files_scanned
     secs = stats.elapsed_seconds or 0.0
-    data_external = _format_bytes(stats.attested_external_bytes)
-    data_f33 = _format_bytes(stats.attested_f33_bytes)
+    data_total = _format_bytes(stats.total_bytes)
+    data_attested = _format_bytes(stats.attested_bytes)
     data_unattested = _format_bytes(stats.unattested_bytes)
+
+    print(f"[FILE COUNT]    : {files:,}")
+    print(f"[TOTAL BYTES]   : {data_total}")
+    print(f"[ATTESTED]      : {stats.attested_files:,} files, {data_attested}")
+    print(f"[UNATTESTED]    : {stats.unattested_files:,} files, {data_unattested}")
+    print(f"[ELAPSED]       : {secs:.2f}s")
+
+    if not compliance_report:
+        return
 
     exposure_pct = stats.exposure_ratio * 100.0 if stats.total_bytes > 0 else 0.0
     risk = stats.risk_level
 
-    print(f"[TOOLCHAIN]     : FORS33 Data Provenance Kit (DPK)")
-    print(f"[SCAN SUMMARY]  : Evaluated {files:,} files in {secs:.2f}s")
-    print(
-        "[ATTESTED]      : "
-        f"{data_external} (External: .sig, .asc, .sha256, .sha512, .md5, .pem)"
-    )
-    print(
-        f"[ATTESTED]      : {data_f33} (FΦRS33 Deterministic Sidecars)"
-    )
-    print(f"[UNATTESTED]    : {data_unattested} (Signatures missing)")
     print()
     print(f"[EXPOSURE RISK] : {exposure_pct:.1f}% volume exposed to silent mutation")
     print(f"[SEVERITY]      : {risk}")
@@ -509,7 +674,7 @@ def print_human_report(stats: ScanStats) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "FORS33 Liability Scanner — quantify attested vs unattested data bytes "
+            "FORS33 Liability Scanner: quantify attested vs unattested data bytes "
             "using .f33 sidecars."
         )
     )
@@ -534,12 +699,24 @@ def main() -> None:
         help="Emit JSON summary to stdout instead of human-readable report.",
     )
     parser.add_argument(
+        "--compliance-report",
+        action="store_true",
+        help="Include SEC/ESIC exposure, severity, and remediation text in human output.",
+    )
+    parser.add_argument(
+        "--emit-checksums",
+        metavar="PATH",
+        dest="emit_checksums_path",
+        help=(
+            "Write checksum baseline (Hash Filename format) for all candidate files. "
+            "Supports sha256, sha512, blake3 per --algo. Use '-' to write to stdout."
+        ),
+    )
+    parser.add_argument(
         "--emit-sha256sum",
         metavar="PATH",
-        help=(
-            "Write a sha256sum-style baseline for all candidate files. "
-            "Use '-' to write to stdout."
-        ),
+        dest="emit_checksums_path",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--emit-csv",
@@ -574,71 +751,90 @@ def main() -> None:
     )
     parser.add_argument(
         "--algo",
-        choices=["sha256", "sha512", "blake3"],
+        choices=["sha256", "sha512", "blake3", "md5", "sha1"],
         default="sha256",
         help="Hash algorithm to use when generating baselines. Default: sha256.",
     )
+    parser.add_argument(
+        "--strip-mount-prefix",
+        metavar="PREFIX",
+        default="",
+        help="Strip this prefix from roots and paths in stored/logged/JSON output (e.g. Docker host-mount).",
+    )
     args = parser.parse_args()
 
+    # Environment overrides (FORS33_*)
+    if os.environ.get("FORS33_ALGO"):
+        args.algo = os.environ["FORS33_ALGO"].strip().lower()
+    if os.environ.get("FORS33_THRESHOLD_MB"):
+        try:
+            args.threshold_mb = float(os.environ["FORS33_THRESHOLD_MB"].strip())
+        except ValueError:
+            pass
+    if os.environ.get("FORS33_ROOT"):
+        args.root = [os.environ["FORS33_ROOT"].strip()] if not args.root else args.root
+    if _env_bool("FORS33_FOLLOW_SYMLINKS"):
+        args.follow_symlinks = True
+    if os.environ.get("FORS33_IGNORE_PATTERN"):
+        pats = [p.strip() for p in os.environ["FORS33_IGNORE_PATTERN"].split(",") if p.strip()]
+        args.ignore_pattern = list(args.ignore_pattern or []) + pats
+    if os.environ.get("FORS33_EXCLUDE_DIR"):
+        dirs = [d.strip() for d in os.environ["FORS33_EXCLUDE_DIR"].split(",") if d.strip()]
+        args.exclude_dir = list(args.exclude_dir or []) + dirs
+
     roots = args.root or [os.getcwd()]
-    emit_shasum = args.emit_sha256sum
+    emit_checksums_path = args.emit_checksums_path
     emit_csv = args.emit_csv
     emit_json_path = args.emit_json_path
-    wants_baseline = bool(emit_shasum or emit_csv or emit_json_path)
+    wants_baseline = bool(emit_checksums_path or emit_csv or emit_json_path)
 
-    if wants_baseline and len(roots) != 1:
+    if args.algo == "blake3":
+        try:
+            import blake3  # noqa: F401
+        except ImportError:
+            print("[ERROR] --algo blake3 requires the blake3 package. pip install blake3", file=sys.stderr)
+            return
+
+    if args.algo in ("md5", "sha1") and wants_baseline:
         print(
-            "[ERROR] Baseline generation (--emit-*) currently supports a single --root only.",
+            "[WARNING] Generating baseline with deprecated cryptographic algorithm.",
+            file=sys.stderr,
+        )
+
+    if wants_baseline and len(roots) > 1 and (emit_checksums_path or emit_csv):
+        print(
+            "[ERROR] --emit-checksums and --emit-csv support a single --root only.",
             file=sys.stderr,
         )
         return
 
-    # Single walk when baseline needed: collect stats + candidates in one pass.
-    if wants_baseline:
-        root = roots[0]
-        threshold_bytes = int(args.threshold_mb * 1024 * 1024)
-        base_ignore = list(args.ignore_pattern or []) + _load_f33ignore_patterns(root)
-        stats, candidates = _walk_and_collect(
-            root,
-            threshold_bytes,
-            base_ignore,
-            set(args.exclude_dir or []),
-            args.follow_symlinks,
-        )
-        records = _hash_candidates(
-            candidates, args.algo, args.follow_symlinks, stats
-        )
-    else:
-        stats = scan_roots(
-            roots,
-            args.threshold_mb,
-            ignore_patterns=args.ignore_pattern,
-            exclude_dirs=args.exclude_dir,
-            follow_symlinks=args.follow_symlinks,
-        )
-        records = []
+    stats, records = execute_scan(
+        roots=roots,
+        threshold_mb=args.threshold_mb,
+        ignore_patterns=args.ignore_pattern,
+        exclude_dirs=args.exclude_dir,
+        follow_symlinks=args.follow_symlinks,
+        algo=args.algo,
+        wants_baseline=wants_baseline,
+        progress_event_callback=None,
+        strip_mount_prefix=args.strip_mount_prefix or "",
+    )
+    roots_abs = stats.roots
 
     stdout_is_payload = any(
         p == "-"
-        for p in (emit_shasum, emit_csv, emit_json_path)
+        for p in (emit_checksums_path, emit_csv, emit_json_path)
         if p is not None
     )
 
-    if emit_shasum and args.algo != "sha256":
-        print(
-            "[ERROR] --emit-sha256sum requires --algo sha256 (sha256sum format).",
-            file=sys.stderr,
-        )
-        return
-
     if wants_baseline:
 
-        if emit_shasum:
-            if emit_shasum == "-":
-                _write_shasum(records, sys.stdout)
+        if emit_checksums_path:
+            if emit_checksums_path == "-":
+                _write_checksums(records, sys.stdout)
             else:
-                with open(emit_shasum, "w", encoding="utf-8") as f:
-                    _write_shasum(records, f)
+                with open(emit_checksums_path, "w", encoding="utf-8") as f:
+                    _write_checksums(records, f)
 
         if emit_csv:
             if emit_csv == "-":
@@ -649,10 +845,16 @@ def main() -> None:
 
         if emit_json_path:
             if emit_json_path == "-":
-                _write_json_baseline(records, root, args.algo, sys.stdout, stats=stats)
+                _write_json_baseline(
+                    records, roots_abs, args.algo, sys.stdout,
+                    stats=stats, strip_mount_prefix=args.strip_mount_prefix or "",
+                )
             else:
                 with open(emit_json_path, "w", encoding="utf-8") as f:
-                    _write_json_baseline(records, root, args.algo, f, stats=stats)
+                    _write_json_baseline(
+                        records, roots_abs, args.algo, f,
+                        stats=stats, strip_mount_prefix=args.strip_mount_prefix or "",
+                    )
 
     # Summary output: respect existing --json behavior, but avoid polluting stdout when
     # it has been used for baseline payloads.
@@ -668,7 +870,7 @@ def main() -> None:
         return
 
     if not args.json and not stdout_is_payload:
-        print_human_report(stats)
+        print_human_report(stats, compliance_report=args.compliance_report)
 
 
 if __name__ == "__main__":

@@ -3,13 +3,17 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-COPY . /app
 
-RUN pip install --no-cache-dir .
+# Copy project files into the image.
+COPY . .
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Enforce supply-chain hardening: install hash-locked dependencies.
+COPY requirements-release.txt .
+RUN pip install -r requirements-release.txt --require-hashes
 
-ENTRYPOINT ["/entrypoint.sh"]
+# Install the package itself without resolving additional dependencies.
+RUN pip install --no-deps . && chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["--help"]
 

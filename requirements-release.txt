@@ -1,0 +1,4 @@
+ # Generated for fors33-scanner CI lockdown.
+ # Scanner currently has no third-party runtime dependencies.
+ # This file exists to enforce --require-hashes in Dockerfile.ci.
+

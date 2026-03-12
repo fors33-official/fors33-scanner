@@ -1,28 +1,31 @@
 name: publish-fors33-scanner
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
-  publish:
+  build-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Build wheel and sdist
+      - name: Set version
+        id: meta
         run: |
-          python -m pip install --upgrade pip
-          pip install build
-          python -m build
+          if [ -n "${GITHUB_REF_NAME}" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION=latest
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -41,13 +44,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker images
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: true
           tags: |
+            ghcr.io/fors33-official/fors33-scanner:${{ steps.meta.outputs.version }}
             ghcr.io/fors33-official/fors33-scanner:latest
+            docker.io/fors33/fors33-scanner:${{ steps.meta.outputs.version }}
             docker.io/fors33/fors33-scanner:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 

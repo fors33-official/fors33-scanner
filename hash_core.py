@@ -35,6 +35,31 @@ def _get_hasher(algo: str):
     raise ValueError(f"Unsupported hash algorithm: {algo}")
 
 
+def path_for_kernel(path: str) -> str:
+    """On Windows, normalize absolute path for kernel calls (stat, open)."""
+    if os.name != "nt":
+        return path
+    if not os.path.isabs(path):
+        return path
+    path = path.replace("/", "\\")
+    if path.startswith("\\\\") and not path.startswith("\\\\?\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    if len(path) >= 2 and path[1] == ":":
+        return "\\\\?\\" + path
+    return path
+
+
+def path_from_kernel(path: str) -> str:
+    """Strip Windows long-path prefix for relpath/comparison with non-prefixed paths."""
+    if os.name != "nt":
+        return path
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[7:]
+    if path.startswith("\\\\?\\"):
+        return path[4:]
+    return path
+
+
 def infer_algo_from_digest(hex_str: str) -> Optional[str]:
     """Infer hash algorithm from hex digest length, when possible."""
     length = len(hex_str)
@@ -69,29 +94,31 @@ def hash_file(
         total_bytes = remaining
     else:
         try:
-            total_bytes = os.path.getsize(path) - start
+            total_bytes = os.path.getsize(path_for_kernel(path)) - start
         except OSError:
             pass
     bytes_read = 0
-    with open(path, "rb") as f:
+    buffer = bytearray(chunk_size)
+    with open(path_for_kernel(path), "rb") as f:
         f.seek(start)
         if remaining is not None:
             while remaining > 0:
-                chunk = f.read(min(remaining, chunk_size))
-                if not chunk:
+                to_read = min(remaining, chunk_size)
+                n = f.readinto(memoryview(buffer)[:to_read])
+                if n <= 0:
                     break
-                hasher.update(chunk)
-                remaining -= len(chunk)
-                bytes_read += len(chunk)
+                hasher.update(memoryview(buffer)[:n])
+                remaining -= n
+                bytes_read += n
                 if progress_callback:
                     progress_callback(bytes_read, total_bytes)
         else:
             while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
+                n = f.readinto(buffer)
+                if n <= 0:
                     break
-                hasher.update(chunk)
-                bytes_read += len(chunk)
+                hasher.update(memoryview(buffer)[:n])
+                bytes_read += n
                 if progress_callback:
                     progress_callback(bytes_read, total_bytes if total_bytes >= 0 else -1)
     return hasher.hexdigest()
