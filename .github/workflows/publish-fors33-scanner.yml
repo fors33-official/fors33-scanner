@@ -2,7 +2,8 @@ name: publish-fors33-scanner
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -19,7 +20,12 @@ jobs:
       - name: Set version
         id: meta
         run: |
-          VERSION=latest
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=latest
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -46,7 +52,9 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
+            ghcr.io/fors33-official/fors33-scanner:${{ steps.meta.outputs.version }}
             ghcr.io/fors33-official/fors33-scanner:latest
+            docker.io/fors33/fors33-scanner:${{ steps.meta.outputs.version }}
             docker.io/fors33/fors33-scanner:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
