@@ -19,12 +19,7 @@ jobs:
       - name: Set version
         id: meta
         run: |
-          if [ -n "${GITHUB_REF_NAME}" ]; then
-            VERSION="${GITHUB_REF_NAME}"
-          else
-            VERSION=latest
-          fi
-          VERSION="${VERSION#v}"
+          VERSION=latest
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -51,9 +46,7 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ghcr.io/fors33-official/fors33-scanner:${{ steps.meta.outputs.version }}
             ghcr.io/fors33-official/fors33-scanner:latest
-            docker.io/fors33/fors33-scanner:${{ steps.meta.outputs.version }}
             docker.io/fors33/fors33-scanner:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
