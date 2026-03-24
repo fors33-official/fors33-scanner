@@ -9,4 +9,8 @@ env/
 venv/
 .pypirc
 .venv/
+.mypy_cache/
+.ruff_cache/
+scanner-v0.4.0-update.md
+docs/scanner-v0.4.0-update.md
 

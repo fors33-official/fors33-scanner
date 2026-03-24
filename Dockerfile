@@ -1,18 +1,31 @@
-# fors33-scanner: CLI-only image for CI/CD liability scans.
-# Read-only; no file uploads out of the runner. Uses .f33 sidecars only.
-FROM python:3.11-slim-bookworm
+# Stage 1: Builder
+FROM python:3.13-alpine AS builder
+RUN apk update && apk upgrade --no-cache
 
 WORKDIR /app
 
-# Copy project files into the image.
-COPY . .
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip==26.0 setuptools==78.1.1 wheel==0.46.2
 
-# Enforce supply-chain hardening: install hash-locked dependencies, then remove build tooling.
 COPY requirements-release.txt .
-RUN pip install -r requirements-release.txt --require-hashes \
-    && pip install --no-deps . \
-    && pip uninstall -y pip setuptools wheel \
-    && chmod +x /app/entrypoint.sh
+RUN pip install --require-hashes -r requirements-release.txt
+
+COPY . .
+RUN pip install --no-deps . && chmod +x /app/entrypoint.sh && pip uninstall -y pip setuptools wheel
+
+# Stage 2: Runtime
+FROM python:3.13-alpine
+RUN apk update && apk upgrade --no-cache
+RUN pip uninstall -y pip setuptools wheel
+RUN adduser -D fors33
+
+WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /app/entrypoint.sh /app/entrypoint.sh
+RUN chown -R fors33:fors33 /app /opt/venv
+USER fors33
+ENV PATH="/opt/venv/bin:$PATH"
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["--help"]

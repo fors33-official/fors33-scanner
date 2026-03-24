@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import datetime, timezone
 import fnmatch
 import json
 import os
@@ -56,6 +57,14 @@ _ATT_EXTS = (
     ".pem",
 )
 _EXTERNAL_EXTS = tuple(ext for ext in _ATT_EXTS if ext != _F33_EXT)
+MAX_WORKERS = 64
+LEGAL_BANNER_LINES = (
+    '[LEGAL]     : FORS33 Liability Scanner is provided "AS IS" without any warranties.',
+    "[LEGAL]     : This tool quantifies cryptographic data gravity but DOES NOT confer",
+    "[LEGAL]     : SEC Rule 17a-4, CFTC 1.31, or FINRA compliance independently.",
+    "[LEGAL]     : Legally binding WORM (Write-Once-Read-Many) retention relies solely",
+    "[LEGAL]     : on your underlying storage infrastructure and configuration.",
+)
 
 
 @dataclass
@@ -153,6 +162,15 @@ def _matches_ignore(rel_path: str, patterns: List[str]) -> bool:
     return False
 
 
+def _depth_from_root(path: str, root: str) -> int:
+    """Return depth using find-style semantics: root=0, child=1."""
+    rel = os.path.relpath(os.path.normpath(os.path.abspath(path)), os.path.normpath(os.path.abspath(root)))
+    if rel in (".", ""):
+        return 0
+    parts = [p for p in rel.replace("\\", "/").split("/") if p and p != "."]
+    return len(parts)
+
+
 def _scan_dir(
     path: str,
     root: str,
@@ -163,6 +181,7 @@ def _scan_dir(
     follow_symlinks: bool,
     visited_dirs: Set[tuple[int, int]],
     visited_files: Set[tuple[int, int]] | None = None,
+    max_depth: int | None = None,
 ) -> None:
     try:
         st_dir = os.stat(path_for_kernel(path), follow_symlinks=False)
@@ -174,6 +193,8 @@ def _scan_dir(
         # Prevent infinite recursion when following symlinks.
         return
     visited_dirs.add(key)
+    if max_depth is not None and _depth_from_root(path, root) >= max_depth:
+        return
     try:
         with os.scandir(path_for_kernel(path)) as it:
             entries = list(it)
@@ -206,6 +227,7 @@ def _scan_dir(
                 follow_symlinks,
                 visited_dirs,
                 visited_files,
+                max_depth,
             )
         elif entry.is_file(follow_symlinks=follow_symlinks):
             stats.files_scanned += 1
@@ -261,6 +283,7 @@ def scan_roots(
     ignore_patterns: List[str] | None = None,
     exclude_dirs: List[str] | None = None,
     follow_symlinks: bool = False,
+    max_depth: int | None = None,
 ) -> ScanStats:
     norm_roots = [os.path.abspath(r) for r in (list(roots) or [os.getcwd()])]
     stats = ScanStats(roots=norm_roots)
@@ -283,6 +306,7 @@ def scan_roots(
             follow_symlinks,
             visited_dirs,
             set() if follow_symlinks else None,
+            max_depth,
         )
 
     stats.elapsed_seconds = time.time() - start
@@ -295,6 +319,7 @@ def _walk_and_collect(
     ignore_patterns: List[str],
     exclude_dirs: Set[str],
     follow_symlinks: bool,
+    max_depth: int | None,
 ) -> tuple[ScanStats, List[tuple[str, str, int, float]]]:
     """
     Single directory walk that collects scan stats and candidate files for baseline.
@@ -311,6 +336,8 @@ def _walk_and_collect(
     walk_root = path_for_kernel(root_abs)
 
     for dirpath, dirnames, filenames in os.walk(walk_root, followlinks=follow_symlinks):
+        if max_depth is not None and _depth_from_root(path_from_kernel(dirpath), root_abs) >= max_depth:
+            dirnames[:] = []
         try:
             st_dir = os.stat(path_for_kernel(dirpath), follow_symlinks=False)
         except OSError:
@@ -376,11 +403,21 @@ def _hash_candidates(
     follow_symlinks: bool,
     stats: ScanStats,
     progress_event_callback: Callable[[dict], None] | None = None,
+    workers: int | None = None,
+    root_paths: List[str] | None = None,
+    record_event_callback: Callable[[dict], None] | None = None,
 ) -> List[Dict[str, object]]:
     """Hash candidate files (single root) and return baseline records."""
     root_indexed = [(0, rel, fp, sz, mt) for rel, fp, sz, mt in candidates]
     return _hash_candidates_multi(
-        root_indexed, algo, follow_symlinks, stats, progress_event_callback
+        root_indexed,
+        algo,
+        follow_symlinks,
+        stats,
+        progress_event_callback,
+        workers=workers,
+        root_paths=root_paths or [],
+        record_event_callback=record_event_callback,
     )
 
 
@@ -390,12 +427,16 @@ def _hash_candidates_multi(
     follow_symlinks: bool,
     stats: ScanStats,
     progress_event_callback: Callable[[dict], None] | None = None,
+    workers: int | None = None,
+    root_paths: List[str] | None = None,
+    record_event_callback: Callable[[dict], None] | None = None,
 ) -> List[Dict[str, object]]:
     """Hash candidate files (multi-root) and return baseline records; update stats.skipped_files and mutated_during_scan."""
     from concurrent.futures import ThreadPoolExecutor
 
     records: List[Dict[str, object]] = []
-    max_workers = min(32, (os.cpu_count() or 1) + 4)
+    max_workers = workers if workers is not None else min(32, (os.cpu_count() or 1) + 4)
+    root_paths = root_paths or []
 
     def _worker(item: tuple[int, str, str, int, float]):
         root_idx, rel, full_path, size, _mtime = item
@@ -438,14 +479,15 @@ def _hash_candidates_multi(
             )
             mutated = before_key != after_key
             mtime_final = st_after.st_mtime
+            completed_ts = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         except Exception as e:
             print(f"[ERROR] Unhandled worker exception: {e}", file=sys.stderr)
-            return (root_idx, rel, size, 0.0, None, True, False)
-        return (root_idx, rel, size, mtime_final, digest, False, mutated)
+            return (root_idx, rel, size, 0.0, None, True, False, "")
+        return (root_idx, rel, size, mtime_final, digest, False, mutated, completed_ts)
 
     executor = ThreadPoolExecutor(max_workers=max_workers)
     try:
-        for root_idx, rel, size, mtime_final, digest, skipped, mutated in executor.map(
+        for root_idx, rel, size, mtime_final, digest, skipped, mutated, completed_ts in executor.map(
             _worker, candidates
         ):
             if skipped:
@@ -463,8 +505,25 @@ def _hash_candidates_multi(
                     "mtime": int(mtime_final),
                     "root_index": root_idx,
                     "status": "baseline",
+                    "completed_at": completed_ts,
                 }
             )
+            if record_event_callback is not None:
+                root_path = root_paths[root_idx] if root_idx < len(root_paths) else ""
+                record_event_callback(
+                    {
+                        "timestamp": completed_ts,
+                        "event_type": "scan_record",
+                        "path": rel,
+                        "algo": algo,
+                        "digest": digest.lower() if isinstance(digest, str) else "",
+                        "bytes": size,
+                        "mtime": int(mtime_final),
+                        "status": "baseline",
+                        "root_index": root_idx,
+                        "root_path": root_path,
+                    }
+                )
     except KeyboardInterrupt:
         executor.shutdown(wait=False, cancel_futures=True)
         sys.exit(130)
@@ -481,6 +540,9 @@ def _compute_baseline(
     stats: ScanStats | None = None,
     ignore_patterns: List[str] | None = None,
     exclude_dirs: Set[str] | None = None,
+    workers: int | None = None,
+    max_depth: int | None = None,
+    record_event_callback: Callable[[dict], None] | None = None,
 ) -> List[Dict[str, object]]:
     """
     Walk a single root and compute baseline records for all candidate files.
@@ -490,7 +552,7 @@ def _compute_baseline(
     ignore_list = ignore_patterns or []
     if stats is not None:
         walk_stats, candidates = _walk_and_collect(
-            root, threshold_bytes, ignore_list, extra_exclude, follow_symlinks
+            root, threshold_bytes, ignore_list, extra_exclude, follow_symlinks, max_depth
         )
         stats.files_scanned = walk_stats.files_scanned
         stats.candidate_files = walk_stats.candidate_files
@@ -506,14 +568,28 @@ def _compute_baseline(
         stats.skipped_files = walk_stats.skipped_files
         stats.elapsed_seconds = walk_stats.elapsed_seconds
         return _hash_candidates(
-            candidates, algo, follow_symlinks, stats, progress_event_callback=None
+            candidates,
+            algo,
+            follow_symlinks,
+            stats,
+            progress_event_callback=None,
+            workers=workers,
+            root_paths=[os.path.abspath(root)],
+            record_event_callback=record_event_callback,
         )
     stats_placeholder = ScanStats(roots=[os.path.abspath(root)])
     _, candidates = _walk_and_collect(
-        root, threshold_bytes, ignore_list, extra_exclude, follow_symlinks
+        root, threshold_bytes, ignore_list, extra_exclude, follow_symlinks, max_depth
     )
     return _hash_candidates(
-        candidates, algo, follow_symlinks, stats_placeholder, progress_event_callback=None
+        candidates,
+        algo,
+        follow_symlinks,
+        stats_placeholder,
+        progress_event_callback=None,
+        workers=workers,
+        root_paths=[os.path.abspath(root)],
+        record_event_callback=record_event_callback,
     )
 
 
@@ -527,6 +603,9 @@ def execute_scan(
     wants_baseline: bool = False,
     progress_event_callback: Callable[[dict], None] | None = None,
     strip_mount_prefix: str = "",
+    workers: int | None = None,
+    max_depth: int | None = None,
+    record_event_callback: Callable[[dict], None] | None = None,
 ) -> tuple[ScanStats, List[Dict[str, object]]]:
     """
     Library entry point: scan roots and optionally compute baseline.
@@ -548,7 +627,7 @@ def execute_scan(
         for root_idx, root in enumerate(roots_abs):
             root_ignore = base_ignore + _load_f33ignore_patterns(root)
             walk_stats, candidates = _walk_and_collect(
-                root, threshold_bytes, root_ignore, exclude_set, follow_symlinks
+                root, threshold_bytes, root_ignore, exclude_set, follow_symlinks, max_depth
             )
             stats.files_scanned += walk_stats.files_scanned
             stats.candidate_files += walk_stats.candidate_files
@@ -566,7 +645,14 @@ def execute_scan(
                 all_candidates.append((root_idx, norm_rel, full_path, size, mtime))
         stats.elapsed_seconds = time.time() - baseline_start
         records = _hash_candidates_multi(
-            all_candidates, algo, follow_symlinks, stats, progress_event_callback
+            all_candidates,
+            algo,
+            follow_symlinks,
+            stats,
+            progress_event_callback,
+            workers=workers,
+            root_paths=roots_abs,
+            record_event_callback=record_event_callback,
         )
     else:
         stats = scan_roots(
@@ -575,6 +661,7 @@ def execute_scan(
             ignore_patterns=base_ignore,
             exclude_dirs=exclude_set,
             follow_symlinks=follow_symlinks,
+            max_depth=max_depth,
         )
         records = []
     return stats, records
@@ -672,6 +759,9 @@ def print_human_report(stats: ScanStats, compliance_report: bool = False) -> Non
 
 
 def main() -> None:
+    for line in LEGAL_BANNER_LINES:
+        print(line, file=sys.stderr)
+
     parser = argparse.ArgumentParser(
         description=(
             "FORS33 Liability Scanner: quantify attested vs unattested data bytes "
@@ -761,6 +851,30 @@ def main() -> None:
         default="",
         help="Strip this prefix from roots and paths in stored/logged/JSON output (e.g. Docker host-mount).",
     )
+    parser.add_argument(
+        "--max-exposure",
+        type=float,
+        default=None,
+        help="Fail with exit code 1 when exposure percentage exceeds this threshold (0-100).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help=f"Number of hashing workers (1-{MAX_WORKERS}). Default uses bounded auto sizing.",
+    )
+    parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=None,
+        help="Maximum traversal depth where 0=root only, 1=root+direct children.",
+    )
+    parser.add_argument(
+        "--emit-jsonl",
+        metavar="PATH",
+        dest="emit_jsonl_path",
+        help="Write JSONL baseline events (scan_record + scan_summary). Use '-' for stdout.",
+    )
     args = parser.parse_args()
 
     # Environment overrides (FORS33_*)
@@ -781,12 +895,41 @@ def main() -> None:
     if os.environ.get("FORS33_EXCLUDE_DIR"):
         dirs = [d.strip() for d in os.environ["FORS33_EXCLUDE_DIR"].split(",") if d.strip()]
         args.exclude_dir = list(args.exclude_dir or []) + dirs
+    if os.environ.get("FORS33_MAX_EXPOSURE"):
+        try:
+            args.max_exposure = float(os.environ["FORS33_MAX_EXPOSURE"].strip())
+        except ValueError:
+            print("[ERROR] FORS33_MAX_EXPOSURE must be a float.", file=sys.stderr)
+            sys.exit(2)
+    if os.environ.get("FORS33_WORKERS"):
+        try:
+            args.workers = int(os.environ["FORS33_WORKERS"].strip())
+        except ValueError:
+            print("[ERROR] FORS33_WORKERS must be an integer.", file=sys.stderr)
+            sys.exit(2)
+    if os.environ.get("FORS33_MAX_DEPTH"):
+        try:
+            args.max_depth = int(os.environ["FORS33_MAX_DEPTH"].strip())
+        except ValueError:
+            print("[ERROR] FORS33_MAX_DEPTH must be an integer.", file=sys.stderr)
+            sys.exit(2)
 
     roots = args.root or [os.getcwd()]
     emit_checksums_path = args.emit_checksums_path
     emit_csv = args.emit_csv
     emit_json_path = args.emit_json_path
-    wants_baseline = bool(emit_checksums_path or emit_csv or emit_json_path)
+    emit_jsonl_path = args.emit_jsonl_path
+    wants_baseline = bool(emit_checksums_path or emit_csv or emit_json_path or emit_jsonl_path)
+
+    if args.max_exposure is not None and not (0.0 <= args.max_exposure <= 100.0):
+        print("[ERROR] --max-exposure must be between 0 and 100.", file=sys.stderr)
+        sys.exit(2)
+    if args.workers is not None and not (1 <= args.workers <= MAX_WORKERS):
+        print(f"[ERROR] --workers must be between 1 and {MAX_WORKERS}.", file=sys.stderr)
+        sys.exit(2)
+    if args.max_depth is not None and args.max_depth < 0:
+        print("[ERROR] --max-depth must be >= 0.", file=sys.stderr)
+        sys.exit(2)
 
     if args.algo == "blake3":
         try:
@@ -806,7 +949,23 @@ def main() -> None:
             "[ERROR] --emit-checksums and --emit-csv support a single --root only.",
             file=sys.stderr,
         )
-        return
+        sys.exit(2)
+
+    jsonl_stream = None
+    jsonl_should_close = False
+    if emit_jsonl_path:
+        if emit_jsonl_path == "-":
+            jsonl_stream = sys.stdout
+        else:
+            jsonl_stream = open(emit_jsonl_path, "w", encoding="utf-8")
+            jsonl_should_close = True
+
+    def _emit_jsonl_event(event: dict) -> None:
+        if jsonl_stream is None:
+            return
+        json.dump(event, jsonl_stream)
+        jsonl_stream.write("\n")
+        jsonl_stream.flush()
 
     stats, records = execute_scan(
         roots=roots,
@@ -818,12 +977,15 @@ def main() -> None:
         wants_baseline=wants_baseline,
         progress_event_callback=None,
         strip_mount_prefix=args.strip_mount_prefix or "",
+        workers=args.workers,
+        max_depth=args.max_depth,
+        record_event_callback=_emit_jsonl_event if jsonl_stream is not None else None,
     )
     roots_abs = stats.roots
 
     stdout_is_payload = any(
         p == "-"
-        for p in (emit_checksums_path, emit_csv, emit_json_path)
+        for p in (emit_checksums_path, emit_csv, emit_json_path, emit_jsonl_path)
         if p is not None
     )
 
@@ -855,10 +1017,44 @@ def main() -> None:
                         records, roots_abs, args.algo, f,
                         stats=stats, strip_mount_prefix=args.strip_mount_prefix or "",
                     )
+        if emit_jsonl_path:
+            summary_event = {
+                "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                "event_type": "scan_summary",
+                "files_scanned": stats.files_scanned,
+                "candidate_files": stats.candidate_files,
+                "attested_files": stats.attested_files,
+                "unattested_files": stats.unattested_files,
+                "total_bytes": stats.total_bytes,
+                "attested_bytes": stats.attested_bytes,
+                "unattested_bytes": stats.unattested_bytes,
+                "exposure_ratio": stats.exposure_ratio,
+                "risk_level": stats.risk_level,
+                "elapsed_seconds": stats.elapsed_seconds,
+                "skipped_files": stats.skipped_files,
+                "mutated_during_scan": stats.mutated_during_scan,
+                "roots": roots_abs,
+                "threshold_mb": args.threshold_mb,
+                "algo": args.algo,
+                "workers": args.workers if args.workers is not None else min(32, (os.cpu_count() or 1) + 4),
+                "max_depth": args.max_depth,
+            }
+            _emit_jsonl_event(summary_event)
+
+    if jsonl_should_close and jsonl_stream is not None:
+        jsonl_stream.close()
+
+    exposure_pct = stats.exposure_ratio * 100.0 if stats.total_bytes > 0 else 0.0
+    if args.max_exposure is not None and stats.total_bytes > 0 and exposure_pct > args.max_exposure:
+        print(
+            f"[ERROR] Exposure threshold breached: {exposure_pct:.2f}% > {args.max_exposure:.2f}%",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Summary output: respect existing --json behavior, but avoid polluting stdout when
     # it has been used for baseline payloads.
-    if args.json and not stdout_is_payload:
+    if args.json and not stdout_is_payload and not (emit_jsonl_path == "-"):
         payload = asdict(stats)
         payload.update(
             {

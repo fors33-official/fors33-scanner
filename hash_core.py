@@ -8,9 +8,32 @@ streaming, chunk-based hashing suitable for large files.
 from __future__ import annotations
 
 import os
+import mmap
 from typing import Callable, Iterable, Optional
 
 import hashlib
+DEFAULT_MMAP_MIN_MB = 500
+DEFAULT_MMAP_MAX_MB = 4000
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw.strip())
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+
+def _mmap_window_bytes() -> tuple[int, int]:
+    min_mb = _env_int("FORS33_MMAP_MIN_MB", DEFAULT_MMAP_MIN_MB)
+    max_mb = _env_int("FORS33_MMAP_MAX_MB", DEFAULT_MMAP_MAX_MB)
+    if max_mb < min_mb:
+        max_mb = min_mb
+    return (min_mb * 1024 * 1024, max_mb * 1024 * 1024)
+
 
 try:
     import blake3  # type: ignore[attr-defined]
@@ -101,6 +124,24 @@ def hash_file(
     buffer = bytearray(chunk_size)
     with open(path_for_kernel(path), "rb") as f:
         f.seek(start)
+        mmap_min, mmap_max = _mmap_window_bytes()
+        can_try_mmap = (
+            remaining is None
+            and start == 0
+            and total_bytes >= mmap_min
+            and total_bytes <= mmap_max
+        )
+        if can_try_mmap:
+            try:
+                with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_READ) as mm:
+                    hasher.update(mm)
+                    bytes_read = total_bytes if total_bytes >= 0 else len(mm)
+                    if progress_callback:
+                        progress_callback(bytes_read, total_bytes)
+                    return hasher.hexdigest()
+            except (OSError, ValueError, BufferError):
+                # Fall back to bounded chunked hashing for mmap-incompatible filesystems/files.
+                f.seek(start)
         if remaining is not None:
             while remaining > 0:
                 to_read = min(remaining, chunk_size)

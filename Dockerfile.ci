@@ -1,15 +1,27 @@
-# CI validation: build from source with hash-locked dependencies.
-FROM python:3.11-slim
+# CI validation build mirrors hardened runtime model.
+FROM python:3.13-alpine AS builder
+RUN apk update && apk upgrade --no-cache
 
 WORKDIR /app
-COPY . .
-
-# Enforce supply-chain hardening even for scanner: use hashed requirements file.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip==26.0 setuptools==78.1.1 wheel==0.46.2
 COPY requirements-release.txt .
-RUN pip install -r requirements-release.txt --require-hashes
+RUN pip install --require-hashes -r requirements-release.txt
 
-# Install the package itself without resolving additional dependencies.
-RUN pip install --no-deps . && chmod +x /app/entrypoint.sh
+COPY . .
+RUN pip install --no-deps . && chmod +x /app/entrypoint.sh && pip uninstall -y pip setuptools wheel
+
+FROM python:3.13-alpine
+RUN apk update && apk upgrade --no-cache
+RUN pip uninstall -y pip setuptools wheel
+RUN adduser -D fors33
+WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /app/entrypoint.sh /app/entrypoint.sh
+RUN chown -R fors33:fors33 /app /opt/venv
+USER fors33
+ENV PATH="/opt/venv/bin:$PATH"
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["--help"]

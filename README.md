@@ -1,7 +1,9 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
+[![Release](https://img.shields.io/badge/release-0.4.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
+[![Docker Tag](https://img.shields.io/badge/docker-0.4.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
 
@@ -37,6 +39,30 @@ Emit JSON instead of human output (for CI, pipelines):
 fors33-scanner --root /data --json
 ```
 
+Fail CI/CD when exposure breaches policy threshold:
+
+```bash
+fors33-scanner --root /data --max-exposure 5.0 --json
+```
+
+Throttle hashing workers for shared runners:
+
+```bash
+fors33-scanner --root /data --workers 2
+```
+
+Stream SIEM-ready JSONL events (records + summary):
+
+```bash
+fors33-scanner --root /data --emit-jsonl -
+```
+
+Depth-limit traversal (`0=root only`, `1=root + direct children`):
+
+```bash
+fors33-scanner --root /data --max-depth 1
+```
+
 Generate checksum baseline (sha256, sha512, or blake3 per --algo):
 
 ```bash
@@ -57,6 +83,13 @@ Add compliance exposure text to human output (default is strictly mathematical):
 fors33-scanner --root /data --compliance-report
 ```
 
+## Exit codes
+
+- `0`: successful scan / threshold not breached
+- `1`: exposure threshold breach (`--max-exposure`)
+- `2`: invocation/parameter misuse
+- `130`: user interrupted scan (Ctrl+C)
+
 ## Output
 
 Default human output (mathematical only):
@@ -74,6 +107,21 @@ Default human output (mathematical only):
 - Read-only: does not modify files or sidecars.
 - Scan-only: O(1) discovery; baseline generation uses streaming chunked hashing.
 - Excludes common dirs (.git, node_modules, venv, etc). Respects .f33ignore and --ignore-pattern / --exclude-dir.
+- Legal notice prints to `stderr` on startup so data/JSON streams on `stdout` remain parse-safe.
+- See `DISCLAIMER.md` for enterprise legal/regulatory boundaries.
+
+## JSONL contract
+
+- `--emit-jsonl PATH` emits one flat JSON object per line.
+- Multi-root scans include both `root_index` and `root_path` in each `scan_record`.
+- `timestamp` represents hash completion time.
+- Final line is `scan_summary` with aggregate stats and scan parameters.
+- If `--emit-jsonl -` and `--json` are both requested, JSONL takes precedence on `stdout`.
+
+## Release model
+
+- Docker publish is manual via `workflow_dispatch` with explicit `version` and `push_latest` inputs.
+- Use `v0.4.0` style version tags and `latest` only when manually approved.
 
 ## Requirements
 

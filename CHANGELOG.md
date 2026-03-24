@@ -2,6 +2,32 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [0.4.0] - 2026-03-24
+
+### Added
+
+- **`--max-exposure` gate**: CI/CD threshold enforcement with exit code `1` when exposure exceeds configured percentage.
+- **`--workers` control**: explicit hashing worker override with hard ceiling (`MAX_WORKERS=64`) for safe shared-runner behavior.
+- **`--emit-jsonl` stream**: SIEM-ready JSON Lines output with per-record events and final `scan_summary`.
+- **Multi-root JSONL metadata**: each `scan_record` includes `root_index` and `root_path`.
+- **`--max-depth` traversal limit**: find-style depth semantics (`0=root`, `1=root+children`) for bounded scans.
+- **Mmap env controls**: `FORS33_MMAP_MIN_MB` and `FORS33_MMAP_MAX_MB` (defaults `500` and `4000`) for bounded large-file mmap hashing.
+- **`DISCLAIMER.md`**: enterprise legal/regulatory boundary documentation in repository root.
+- **Scanner `.dockerignore`**: hardened build context hygiene aligned with verifier patterns.
+
+### Changed
+
+- Exit-code contract is explicit and stable:
+  - `0` success / threshold not breached
+  - `1` exposure threshold breach
+  - `2` parameter misuse
+  - `130` user interrupt
+- Legal startup notice now prints to `stderr` to keep `stdout` machine-readable.
+- When both `--emit-jsonl -` and `--json` are requested, JSONL stream takes precedence on `stdout`.
+- Depth calculation uses normalized cross-platform path handling for Windows/POSIX consistency.
+- Docker build flows moved to hardened multi-stage `python:3.13-alpine` model with pinned build tooling.
+- Publish workflow is manual `workflow_dispatch` only with explicit `version` and `push_latest` inputs.
+
 ## [0.3.0] - 2026-03-10
 
 ### Added
