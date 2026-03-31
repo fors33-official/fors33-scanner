@@ -2,6 +2,22 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [0.5.0] - 2026-03-31
+
+### Added
+
+- **`_default_worker_count()`** and **`FORS33_EXTENSION_MODE`**: extension profile uses 4 workers; otherwise `min(32, cpu+4)`.
+- **`--strict-audit`**: raises `StrictAuditFatal` (exit **2**) on permission/locking I/O errors instead of skipping.
+- **`unverified_paths_sample`**: up to **300** sample paths for unattested candidates (walk + scandir paths).
+- **`--tsa-url`**: sets `FORS33_TSA_URL` after parse for downstream seal tooling.
+- **Reference-aligned legal banner** lines on stderr at startup.
+
+### Changed
+
+- **Worker resolution**: `max_workers` / `execute_scan`; `<= 0` or unset uses default; positive values capped at **64**; `FORS33_WORKERS` overwrites `--workers` after parse.
+- **Depth semantics**: aligned with reference (`_depth_from_root(root, path)`; walk collects files at `max_depth` without descending further).
+- **JSONL `scan_summary`**: includes stratified attested f33/external counts and bytes; `workers` reports **effective** thread count.
+
 ## [0.4.0] - 2026-03-24
 
 ### Added

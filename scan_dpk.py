@@ -19,7 +19,7 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Callable, Dict, Iterable, List, Set
 
 try:
@@ -32,6 +32,12 @@ def _env_bool(key: str) -> bool:
     """Strict string-to-bool: True only for 1, true, yes, y; False otherwise."""
     v = os.environ.get(key, "").strip().lower()
     return v in ("1", "true", "yes", "y")
+
+
+def _default_worker_count() -> int:
+    if os.environ.get("FORS33_EXTENSION_MODE", "").strip() == "1":
+        return 4
+    return min(32, (os.cpu_count() or 1) + 4)
 
 
 _EXCLUDE_DIRS: Set[str] = {
@@ -57,14 +63,29 @@ _ATT_EXTS = (
     ".pem",
 )
 _EXTERNAL_EXTS = tuple(ext for ext in _ATT_EXTS if ext != _F33_EXT)
-MAX_WORKERS = 64
+
 LEGAL_BANNER_LINES = (
-    '[LEGAL]     : FORS33 Liability Scanner is provided "AS IS" without any warranties.',
-    "[LEGAL]     : This tool quantifies cryptographic data gravity but DOES NOT confer",
-    "[LEGAL]     : SEC Rule 17a-4, CFTC 1.31, or FINRA compliance independently.",
-    "[LEGAL]     : Legally binding WORM (Write-Once-Read-Many) retention relies solely",
-    "[LEGAL]     : on your underlying storage infrastructure and configuration.",
+    "[LEGAL]  FORS33 Liability Scanner",
+    "[LEGAL]  This scanner quantifies attestation coverage only.",
+    "[LEGAL]  Verify results in your chain-of-custody workflow.",
+    "[LEGAL]  Do not treat summary output as cryptographic proof.",
+    "[LEGAL]  Unauthorized use is prohibited.",
 )
+
+
+class StrictAuditFatal(Exception):
+    """Raised when strict_audit_mode is on and a path is inaccessible (permissions or lock)."""
+
+
+def _is_strict_audit_io_error(exc: BaseException) -> bool:
+    if isinstance(exc, PermissionError):
+        return True
+    if isinstance(exc, OSError):
+        if getattr(exc, "errno", None) in (1, 13):
+            return True
+        if getattr(exc, "winerror", None) in (5, 32, 33):
+            return True
+    return False
 
 
 @dataclass
@@ -97,6 +118,14 @@ class ScanStats:
     elapsed_seconds: float = 0.0
     skipped_files: int = 0
     mutated_during_scan: int = 0
+    unverified_paths_sample: List[Dict[str, str]] = field(default_factory=list)
+
+    def add_unverified_sample(self, rel_path: str, status: str = "UNSEALED") -> None:
+        if len(self.unverified_paths_sample) >= 300:
+            return
+        self.unverified_paths_sample.append(
+            {"path": rel_path.replace("\\", "/"), "status": status}
+        )
 
     @property
     def exposure_ratio(self) -> float:
@@ -162,13 +191,20 @@ def _matches_ignore(rel_path: str, patterns: List[str]) -> bool:
     return False
 
 
-def _depth_from_root(path: str, root: str) -> int:
-    """Return depth using find-style semantics: root=0, child=1."""
-    rel = os.path.relpath(os.path.normpath(os.path.abspath(path)), os.path.normpath(os.path.abspath(root)))
-    if rel in (".", ""):
+def _depth_from_root(root_path: str, current_path: str) -> int:
+    """
+    Compute traversal depth where:
+      - depth(root) == 0
+      - depth(root/child) == 1
+    Normalizes both paths to make dot-slash and slash/backslash cases stable.
+    """
+    root_np = os.path.normpath(os.path.abspath(path_from_kernel(root_path)))
+    cur_np = os.path.normpath(os.path.abspath(path_from_kernel(current_path)))
+    rel = os.path.relpath(cur_np, root_np)
+    rel_norm = rel.replace("\\", "/")
+    if rel_norm == ".":
         return 0
-    parts = [p for p in rel.replace("\\", "/").split("/") if p and p != "."]
-    return len(parts)
+    return len(rel_norm.split("/"))
 
 
 def _scan_dir(
@@ -181,11 +217,14 @@ def _scan_dir(
     follow_symlinks: bool,
     visited_dirs: Set[tuple[int, int]],
     visited_files: Set[tuple[int, int]] | None = None,
+    strict_audit: bool = False,
     max_depth: int | None = None,
 ) -> None:
     try:
         st_dir = os.stat(path_for_kernel(path), follow_symlinks=False)
-    except OSError:
+    except OSError as e:
+        if strict_audit and _is_strict_audit_io_error(e):
+            raise StrictAuditFatal(f"Inaccessible directory (strict audit): {path}: {e}") from e
         return
 
     key = (st_dir.st_dev, st_dir.st_ino)
@@ -193,13 +232,12 @@ def _scan_dir(
         # Prevent infinite recursion when following symlinks.
         return
     visited_dirs.add(key)
-    if max_depth is not None and _depth_from_root(path, root) >= max_depth:
-        return
     try:
         with os.scandir(path_for_kernel(path)) as it:
             entries = list(it)
-    except (PermissionError, FileNotFoundError, NotADirectoryError, OSError):
-        # Entire directory is unreadable; treat contents as skipped.
+    except (PermissionError, FileNotFoundError, NotADirectoryError, OSError) as e:
+        if strict_audit and _is_strict_audit_io_error(e):
+            raise StrictAuditFatal(f"Inaccessible directory (strict audit): {path}: {e}") from e
         return
 
     # Build an in-memory set of filenames in this directory so we can check for
@@ -217,6 +255,8 @@ def _scan_dir(
             rel_dir = os.path.relpath(path_from_kernel(entry_path), path_from_kernel(root))
             if _matches_ignore(rel_dir, ignore_patterns):
                 continue
+            if max_depth is not None and _depth_from_root(root, entry_path) > max_depth:
+                continue
             _scan_dir(
                 entry_path,
                 root,
@@ -227,7 +267,8 @@ def _scan_dir(
                 follow_symlinks,
                 visited_dirs,
                 visited_files,
-                max_depth,
+                strict_audit=strict_audit,
+                max_depth=max_depth,
             )
         elif entry.is_file(follow_symlinks=follow_symlinks):
             stats.files_scanned += 1
@@ -239,7 +280,11 @@ def _scan_dir(
                 continue
             try:
                 st = entry.stat(follow_symlinks=follow_symlinks)
-            except OSError:
+            except OSError as e:
+                if strict_audit and _is_strict_audit_io_error(e):
+                    raise StrictAuditFatal(
+                        f"Inaccessible file (strict audit): {entry_path}: {e}"
+                    ) from e
                 stats.skipped_files += 1
                 continue
             if follow_symlinks and visited_files is not None and st.st_ino != 0:
@@ -275,6 +320,7 @@ def _scan_dir(
             else:
                 stats.unattested_files += 1
                 stats.unattested_bytes += size
+                stats.add_unverified_sample(rel_path, "UNSEALED")
 
 
 def scan_roots(
@@ -283,6 +329,7 @@ def scan_roots(
     ignore_patterns: List[str] | None = None,
     exclude_dirs: List[str] | None = None,
     follow_symlinks: bool = False,
+    strict_audit: bool = False,
     max_depth: int | None = None,
 ) -> ScanStats:
     norm_roots = [os.path.abspath(r) for r in (list(roots) or [os.getcwd()])]
@@ -306,7 +353,8 @@ def scan_roots(
             follow_symlinks,
             visited_dirs,
             set() if follow_symlinks else None,
-            max_depth,
+            strict_audit=strict_audit,
+            max_depth=max_depth,
         )
 
     stats.elapsed_seconds = time.time() - start
@@ -319,14 +367,13 @@ def _walk_and_collect(
     ignore_patterns: List[str],
     exclude_dirs: Set[str],
     follow_symlinks: bool,
-    max_depth: int | None,
+    strict_audit: bool = False,
+    max_depth: int | None = None,
 ) -> tuple[ScanStats, List[tuple[str, str, int, float]]]:
     """
     Single directory walk that collects scan stats and candidate files for baseline.
     Returns (stats, candidates). No second os.walk; skipped_files counted once.
     """
-    from concurrent.futures import ThreadPoolExecutor
-
     root_abs = os.path.abspath(root)
     stats = ScanStats(roots=[root_abs])
     visited_dirs: Set[tuple[int, int]] = set()
@@ -336,11 +383,13 @@ def _walk_and_collect(
     walk_root = path_for_kernel(root_abs)
 
     for dirpath, dirnames, filenames in os.walk(walk_root, followlinks=follow_symlinks):
-        if max_depth is not None and _depth_from_root(path_from_kernel(dirpath), root_abs) >= max_depth:
-            dirnames[:] = []
         try:
             st_dir = os.stat(path_for_kernel(dirpath), follow_symlinks=False)
-        except OSError:
+        except OSError as e:
+            if strict_audit and _is_strict_audit_io_error(e):
+                raise StrictAuditFatal(
+                    f"Inaccessible directory (strict audit): {dirpath}: {e}"
+                ) from e
             continue
         key = (st_dir.st_dev, st_dir.st_ino)
         if key in visited_dirs:
@@ -349,6 +398,14 @@ def _walk_and_collect(
         dirnames[:] = [
             d for d in dirnames if d not in _EXCLUDE_DIRS and d not in exclude_dirs
         ]
+        if max_depth is not None:
+            current_depth = _depth_from_root(root_abs, dirpath)
+            if current_depth > max_depth:
+                dirnames[:] = []
+                continue
+            if current_depth >= max_depth:
+                # Do not descend further, but still process this directory's files.
+                dirnames[:] = []
         filenames_set = set(filenames)
         for name in filenames:
             if any(name.endswith(ext) for ext in _ATT_EXTS):
@@ -361,7 +418,11 @@ def _walk_and_collect(
             stats.files_scanned += 1
             try:
                 st = os.stat(path_for_kernel(full_path), follow_symlinks=follow_symlinks)
-            except OSError:
+            except OSError as e:
+                if strict_audit and _is_strict_audit_io_error(e):
+                    raise StrictAuditFatal(
+                        f"Inaccessible file (strict audit): {full_path}: {e}"
+                    ) from e
                 stats.skipped_files += 1
                 continue
             if follow_symlinks and st.st_ino != 0:
@@ -391,6 +452,7 @@ def _walk_and_collect(
             else:
                 stats.unattested_files += 1
                 stats.unattested_bytes += size
+                stats.add_unverified_sample(norm_rel, "UNSEALED")
             candidates.append((norm_rel, full_path, size, st.st_mtime))
 
     stats.elapsed_seconds = time.time() - start
@@ -403,7 +465,7 @@ def _hash_candidates(
     follow_symlinks: bool,
     stats: ScanStats,
     progress_event_callback: Callable[[dict], None] | None = None,
-    workers: int | None = None,
+    max_workers: int | None = None,
     root_paths: List[str] | None = None,
     record_event_callback: Callable[[dict], None] | None = None,
 ) -> List[Dict[str, object]]:
@@ -415,7 +477,7 @@ def _hash_candidates(
         follow_symlinks,
         stats,
         progress_event_callback,
-        workers=workers,
+        max_workers=max_workers,
         root_paths=root_paths or [],
         record_event_callback=record_event_callback,
     )
@@ -427,7 +489,7 @@ def _hash_candidates_multi(
     follow_symlinks: bool,
     stats: ScanStats,
     progress_event_callback: Callable[[dict], None] | None = None,
-    workers: int | None = None,
+    max_workers: int | None = None,
     root_paths: List[str] | None = None,
     record_event_callback: Callable[[dict], None] | None = None,
 ) -> List[Dict[str, object]]:
@@ -435,7 +497,10 @@ def _hash_candidates_multi(
     from concurrent.futures import ThreadPoolExecutor
 
     records: List[Dict[str, object]] = []
-    max_workers = workers if workers is not None else min(32, (os.cpu_count() or 1) + 4)
+    if max_workers is None or max_workers <= 0:
+        effective_workers = _default_worker_count()
+    else:
+        effective_workers = min(64, int(max_workers))
     root_paths = root_paths or []
 
     def _worker(item: tuple[int, str, str, int, float]):
@@ -485,7 +550,7 @@ def _hash_candidates_multi(
             return (root_idx, rel, size, 0.0, None, True, False, "")
         return (root_idx, rel, size, mtime_final, digest, False, mutated, completed_ts)
 
-    executor = ThreadPoolExecutor(max_workers=max_workers)
+    executor = ThreadPoolExecutor(max_workers=effective_workers)
     try:
         for root_idx, rel, size, mtime_final, digest, skipped, mutated, completed_ts in executor.map(
             _worker, candidates
@@ -540,8 +605,9 @@ def _compute_baseline(
     stats: ScanStats | None = None,
     ignore_patterns: List[str] | None = None,
     exclude_dirs: Set[str] | None = None,
-    workers: int | None = None,
+    max_workers: int | None = None,
     max_depth: int | None = None,
+    strict_audit: bool = False,
     record_event_callback: Callable[[dict], None] | None = None,
 ) -> List[Dict[str, object]]:
     """
@@ -552,7 +618,13 @@ def _compute_baseline(
     ignore_list = ignore_patterns or []
     if stats is not None:
         walk_stats, candidates = _walk_and_collect(
-            root, threshold_bytes, ignore_list, extra_exclude, follow_symlinks, max_depth
+            root,
+            threshold_bytes,
+            ignore_list,
+            extra_exclude,
+            follow_symlinks,
+            strict_audit=strict_audit,
+            max_depth=max_depth,
         )
         stats.files_scanned = walk_stats.files_scanned
         stats.candidate_files = walk_stats.candidate_files
@@ -567,19 +639,27 @@ def _compute_baseline(
         stats.attested_external_bytes = walk_stats.attested_external_bytes
         stats.skipped_files = walk_stats.skipped_files
         stats.elapsed_seconds = walk_stats.elapsed_seconds
+        for row in walk_stats.unverified_paths_sample:
+            stats.add_unverified_sample(row["path"], row.get("status", "UNSEALED"))
         return _hash_candidates(
             candidates,
             algo,
             follow_symlinks,
             stats,
             progress_event_callback=None,
-            workers=workers,
+            max_workers=max_workers,
             root_paths=[os.path.abspath(root)],
             record_event_callback=record_event_callback,
         )
     stats_placeholder = ScanStats(roots=[os.path.abspath(root)])
     _, candidates = _walk_and_collect(
-        root, threshold_bytes, ignore_list, extra_exclude, follow_symlinks, max_depth
+        root,
+        threshold_bytes,
+        ignore_list,
+        extra_exclude,
+        follow_symlinks,
+        strict_audit=strict_audit,
+        max_depth=max_depth,
     )
     return _hash_candidates(
         candidates,
@@ -587,7 +667,7 @@ def _compute_baseline(
         follow_symlinks,
         stats_placeholder,
         progress_event_callback=None,
-        workers=workers,
+        max_workers=max_workers,
         root_paths=[os.path.abspath(root)],
         record_event_callback=record_event_callback,
     )
@@ -603,8 +683,9 @@ def execute_scan(
     wants_baseline: bool = False,
     progress_event_callback: Callable[[dict], None] | None = None,
     strip_mount_prefix: str = "",
-    workers: int | None = None,
+    strict_audit: bool = False,
     max_depth: int | None = None,
+    max_workers: int | None = None,
     record_event_callback: Callable[[dict], None] | None = None,
 ) -> tuple[ScanStats, List[Dict[str, object]]]:
     """
@@ -627,7 +708,13 @@ def execute_scan(
         for root_idx, root in enumerate(roots_abs):
             root_ignore = base_ignore + _load_f33ignore_patterns(root)
             walk_stats, candidates = _walk_and_collect(
-                root, threshold_bytes, root_ignore, exclude_set, follow_symlinks, max_depth
+                root,
+                threshold_bytes,
+                root_ignore,
+                exclude_set,
+                follow_symlinks,
+                strict_audit=strict_audit,
+                max_depth=max_depth,
             )
             stats.files_scanned += walk_stats.files_scanned
             stats.candidate_files += walk_stats.candidate_files
@@ -641,6 +728,8 @@ def execute_scan(
             stats.attested_external_files += walk_stats.attested_external_files
             stats.attested_external_bytes += walk_stats.attested_external_bytes
             stats.skipped_files += walk_stats.skipped_files
+            for row in walk_stats.unverified_paths_sample:
+                stats.add_unverified_sample(row["path"], row.get("status", "UNSEALED"))
             for norm_rel, full_path, size, mtime in candidates:
                 all_candidates.append((root_idx, norm_rel, full_path, size, mtime))
         stats.elapsed_seconds = time.time() - baseline_start
@@ -650,7 +739,7 @@ def execute_scan(
             follow_symlinks,
             stats,
             progress_event_callback,
-            workers=workers,
+            max_workers=max_workers,
             root_paths=roots_abs,
             record_event_callback=record_event_callback,
         )
@@ -661,6 +750,7 @@ def execute_scan(
             ignore_patterns=base_ignore,
             exclude_dirs=exclude_set,
             follow_symlinks=follow_symlinks,
+            strict_audit=strict_audit,
             max_depth=max_depth,
         )
         records = []
@@ -861,7 +951,7 @@ def main() -> None:
         "--workers",
         type=int,
         default=None,
-        help=f"Number of hashing workers (1-{MAX_WORKERS}). Default uses bounded auto sizing.",
+        help="Override hashing thread count (hard capped at 64; <=0 uses auto default).",
     )
     parser.add_argument(
         "--max-depth",
@@ -875,7 +965,21 @@ def main() -> None:
         dest="emit_jsonl_path",
         help="Write JSONL baseline events (scan_record + scan_summary). Use '-' for stdout.",
     )
+    parser.add_argument(
+        "--tsa-url",
+        default=None,
+        metavar="URL",
+        help="RFC 3161 TSA endpoint; sets FORS33_TSA_URL for seal-sidecar timestamp requests.",
+    )
+    parser.add_argument(
+        "--strict-audit",
+        action="store_true",
+        help="Fail fast on permission or locking errors instead of skipping paths.",
+    )
     args = parser.parse_args()
+
+    if getattr(args, "tsa_url", None) and str(args.tsa_url).strip():
+        os.environ["FORS33_TSA_URL"] = str(args.tsa_url).strip()
 
     # Environment overrides (FORS33_*)
     if os.environ.get("FORS33_ALGO"):
@@ -924,9 +1028,6 @@ def main() -> None:
     if args.max_exposure is not None and not (0.0 <= args.max_exposure <= 100.0):
         print("[ERROR] --max-exposure must be between 0 and 100.", file=sys.stderr)
         sys.exit(2)
-    if args.workers is not None and not (1 <= args.workers <= MAX_WORKERS):
-        print(f"[ERROR] --workers must be between 1 and {MAX_WORKERS}.", file=sys.stderr)
-        sys.exit(2)
     if args.max_depth is not None and args.max_depth < 0:
         print("[ERROR] --max-depth must be >= 0.", file=sys.stderr)
         sys.exit(2)
@@ -951,6 +1052,11 @@ def main() -> None:
         )
         sys.exit(2)
 
+    if args.workers is not None and args.workers > 0:
+        effective_workers = min(64, int(args.workers))
+    else:
+        effective_workers = _default_worker_count()
+
     jsonl_stream = None
     jsonl_should_close = False
     if emit_jsonl_path:
@@ -967,20 +1073,25 @@ def main() -> None:
         jsonl_stream.write("\n")
         jsonl_stream.flush()
 
-    stats, records = execute_scan(
-        roots=roots,
-        threshold_mb=args.threshold_mb,
-        ignore_patterns=args.ignore_pattern,
-        exclude_dirs=args.exclude_dir,
-        follow_symlinks=args.follow_symlinks,
-        algo=args.algo,
-        wants_baseline=wants_baseline,
-        progress_event_callback=None,
-        strip_mount_prefix=args.strip_mount_prefix or "",
-        workers=args.workers,
-        max_depth=args.max_depth,
-        record_event_callback=_emit_jsonl_event if jsonl_stream is not None else None,
-    )
+    try:
+        stats, records = execute_scan(
+            roots=roots,
+            threshold_mb=args.threshold_mb,
+            ignore_patterns=args.ignore_pattern,
+            exclude_dirs=args.exclude_dir,
+            follow_symlinks=args.follow_symlinks,
+            algo=args.algo,
+            wants_baseline=wants_baseline,
+            progress_event_callback=None,
+            strip_mount_prefix=args.strip_mount_prefix or "",
+            strict_audit=args.strict_audit,
+            max_depth=args.max_depth,
+            max_workers=effective_workers,
+            record_event_callback=_emit_jsonl_event if jsonl_stream is not None else None,
+        )
+    except StrictAuditFatal as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(2)
     roots_abs = stats.roots
 
     stdout_is_payload = any(
@@ -1028,6 +1139,10 @@ def main() -> None:
                 "total_bytes": stats.total_bytes,
                 "attested_bytes": stats.attested_bytes,
                 "unattested_bytes": stats.unattested_bytes,
+                "attested_f33_files": stats.attested_f33_files,
+                "attested_external_files": stats.attested_external_files,
+                "attested_f33_bytes": stats.attested_f33_bytes,
+                "attested_external_bytes": stats.attested_external_bytes,
                 "exposure_ratio": stats.exposure_ratio,
                 "risk_level": stats.risk_level,
                 "elapsed_seconds": stats.elapsed_seconds,
@@ -1036,7 +1151,7 @@ def main() -> None:
                 "roots": roots_abs,
                 "threshold_mb": args.threshold_mb,
                 "algo": args.algo,
-                "workers": args.workers if args.workers is not None else min(32, (os.cpu_count() or 1) + 4),
+                "workers": effective_workers,
                 "max_depth": args.max_depth,
             }
             _emit_jsonl_event(summary_event)

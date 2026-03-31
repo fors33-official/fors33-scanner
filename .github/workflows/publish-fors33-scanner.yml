@@ -1,10 +1,17 @@
 name: publish-fors33-scanner
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag without leading v (example: 0.4.0)'
+        required: true
+        type: string
+      push_latest:
+        description: 'Also publish :latest tag'
+        required: true
+        default: true
+        type: boolean
 
 jobs:
   build-and-push:
@@ -20,13 +27,13 @@ jobs:
       - name: Set version
         id: meta
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
-            VERSION="${VERSION#v}"
-          else
-            VERSION=latest
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            echo "Version input is required."
+            exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "push_latest=${{ inputs.push_latest }}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -53,8 +60,19 @@ jobs:
           push: true
           tags: |
             ghcr.io/fors33-official/fors33-scanner:${{ steps.meta.outputs.version }}
-            ghcr.io/fors33-official/fors33-scanner:latest
             docker.io/fors33/fors33-scanner:${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push latest tags
+        if: ${{ steps.meta.outputs.push_latest == 'true' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/fors33-official/fors33-scanner:latest
             docker.io/fors33/fors33-scanner:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

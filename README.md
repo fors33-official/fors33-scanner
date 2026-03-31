@@ -1,9 +1,9 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
-[![Release](https://img.shields.io/badge/release-0.4.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
+[![Release](https://img.shields.io/badge/release-0.5.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
-[![Docker Tag](https://img.shields.io/badge/docker-0.4.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
+[![Docker Tag](https://img.shields.io/badge/docker-0.5.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
 
@@ -63,6 +63,20 @@ Depth-limit traversal (`0=root only`, `1=root + direct children`):
 fors33-scanner --root /data --max-depth 1
 ```
 
+Strict audit (fail on permission or file-lock errors instead of skipping):
+
+```bash
+fors33-scanner --root /data --strict-audit
+```
+
+Record TSA endpoint for tooling that reads `FORS33_TSA_URL`:
+
+```bash
+fors33-scanner --tsa-url https://tsa.example.com/rfc3161
+```
+
+`FORS33_WORKERS` overrides `--workers` after CLI parse. Default worker count follows `FORS33_EXTENSION_MODE` (4 workers) or `min(32, cpu+4)`; explicit positive values are capped at 64.
+
 Generate checksum baseline (sha256, sha512, or blake3 per --algo):
 
 ```bash
@@ -87,7 +101,7 @@ fors33-scanner --root /data --compliance-report
 
 - `0`: successful scan / threshold not breached
 - `1`: exposure threshold breach (`--max-exposure`)
-- `2`: invocation/parameter misuse
+- `2`: invocation/parameter misuse, or **`--strict-audit`** I/O access failure
 - `130`: user interrupted scan (Ctrl+C)
 
 ## Output
@@ -121,7 +135,7 @@ Default human output (mathematical only):
 ## Release model
 
 - Docker publish is manual via `workflow_dispatch` with explicit `version` and `push_latest` inputs.
-- Use `v0.4.0` style version tags and `latest` only when manually approved.
+- Use `v0.5.0` style version tags and `latest` only when manually approved.
 
 ## Requirements
 
