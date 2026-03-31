@@ -14,6 +14,7 @@ All notable changes to fors33-scanner are documented here.
 
 ### Changed
 
+- **Dockerfile / `Dockerfile.ci`**: Alpine cache cleanup (`rm -rf /var/cache/apk/*`) after upgrade, matching fors33-verifier hardening; multi-stage layout documented in-file.
 - **Worker resolution**: `max_workers` / `execute_scan`; `<= 0` or unset uses default; positive values capped at **64**; `FORS33_WORKERS` overwrites `--workers` after parse.
 - **Depth semantics**: aligned with reference (`_depth_from_root(root, path)`; walk collects files at `max_depth` without descending further).
 - **JSONL `scan_summary`**: includes stratified attested f33/external counts and bytes; `workers` reports **effective** thread count.

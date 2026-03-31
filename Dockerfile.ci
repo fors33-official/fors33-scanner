@@ -1,6 +1,7 @@
-# CI validation build mirrors hardened runtime model.
+# CI validation build mirrors hardened runtime Dockerfile.
 FROM python:3.13-alpine AS builder
-RUN apk update && apk upgrade --no-cache
+RUN apk update && apk upgrade --no-cache \
+    && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 RUN python -m venv /opt/venv
@@ -13,7 +14,8 @@ COPY . .
 RUN pip install --no-deps . && chmod +x /app/entrypoint.sh && pip uninstall -y pip setuptools wheel
 
 FROM python:3.13-alpine
-RUN apk update && apk upgrade --no-cache
+RUN apk update && apk upgrade --no-cache \
+    && rm -rf /var/cache/apk/*
 RUN pip uninstall -y pip setuptools wheel
 RUN adduser -D fors33
 WORKDIR /app

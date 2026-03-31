@@ -1,6 +1,7 @@
-# Stage 1: Builder
+# Multi-stage hardened image (aligned with fors33-verifier: minimal runtime, no pip in final layers).
 FROM python:3.13-alpine AS builder
-RUN apk update && apk upgrade --no-cache
+RUN apk update && apk upgrade --no-cache \
+    && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
@@ -14,9 +15,9 @@ RUN pip install --require-hashes -r requirements-release.txt
 COPY . .
 RUN pip install --no-deps . && chmod +x /app/entrypoint.sh && pip uninstall -y pip setuptools wheel
 
-# Stage 2: Runtime
 FROM python:3.13-alpine
-RUN apk update && apk upgrade --no-cache
+RUN apk update && apk upgrade --no-cache \
+    && rm -rf /var/cache/apk/*
 RUN pip uninstall -y pip setuptools wheel
 RUN adduser -D fors33
 
@@ -29,4 +30,3 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["--help"]
-
