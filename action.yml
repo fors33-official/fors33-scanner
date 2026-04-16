@@ -15,7 +15,7 @@ inputs:
     required: false
 runs:
   using: 'docker'
-  image: 'docker://ghcr.io/fors33/fors33-scanner:latest'
+  image: 'docker://ghcr.io/fors33/fors33-scanner:0.6.0'
   args:
     - ${{ inputs.root }}
     - ${{ inputs.threshold-mb }}

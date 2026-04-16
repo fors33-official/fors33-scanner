@@ -23,9 +23,9 @@ from dataclasses import dataclass, asdict, field
 from typing import Callable, Dict, Iterable, List, Set
 
 try:
-    from .hash_core import hash_file, path_for_kernel, path_from_kernel
+    from .hash_core import default_dpk_worker_count, hash_file, path_for_kernel, path_from_kernel
 except ImportError:  # pragma: no cover - flat layout
-    from hash_core import hash_file, path_for_kernel, path_from_kernel
+    from hash_core import default_dpk_worker_count, hash_file, path_for_kernel, path_from_kernel
 
 
 def _env_bool(key: str) -> bool:
@@ -34,10 +34,22 @@ def _env_bool(key: str) -> bool:
     return v in ("1", "true", "yes", "y")
 
 
-def _default_worker_count() -> int:
-    if os.environ.get("FORS33_EXTENSION_MODE", "").strip() == "1":
-        return 4
-    return min(32, (os.cpu_count() or 1) + 4)
+def resolve_dpk_worker_count(cli_workers: int | None) -> int:
+    """
+    Thread pool size: positive --workers wins; else positive FORS33_WORKERS;
+    else default_dpk_worker_count() (FORS33_DPK_MAX_WORKERS applied inside that).
+    """
+    if cli_workers is not None and cli_workers > 0:
+        return min(64, int(cli_workers))
+    env_raw = os.environ.get("FORS33_WORKERS", "").strip()
+    if env_raw:
+        try:
+            ev = int(env_raw, 10)
+        except ValueError:
+            raise ValueError("FORS33_WORKERS must be an integer") from None
+        if ev > 0:
+            return min(64, ev)
+    return default_dpk_worker_count()
 
 
 _EXCLUDE_DIRS: Set[str] = {
@@ -497,10 +509,7 @@ def _hash_candidates_multi(
     from concurrent.futures import ThreadPoolExecutor
 
     records: List[Dict[str, object]] = []
-    if max_workers is None or max_workers <= 0:
-        effective_workers = _default_worker_count()
-    else:
-        effective_workers = min(64, int(max_workers))
+    effective_workers = resolve_dpk_worker_count(max_workers)
     root_paths = root_paths or []
 
     def _worker(item: tuple[int, str, str, int, float]):
@@ -838,7 +847,7 @@ def print_human_report(stats: ScanStats, compliance_report: bool = False) -> Non
     print(f"[EXPOSURE RISK] : {exposure_pct:.1f}% volume exposed to silent mutation")
     print(f"[SEVERITY]      : {risk}")
     print(
-        "[COMPLIANCE]    : Fails SEC 17a-4 (WORM) and ESIC chain-of-custody controls"
+        "[COMPLIANCE]    : Fails SEC 17a-4 (WORM) and ESMA chain-of-custody controls"
     )
     print(
         "[REMEDIATION]   : Enforce deterministic attestation on exposed directories."
@@ -881,7 +890,7 @@ def main() -> None:
     parser.add_argument(
         "--compliance-report",
         action="store_true",
-        help="Include SEC/ESIC exposure, severity, and remediation text in human output.",
+        help="Include SEC/ESMA exposure, severity, and remediation text in human output.",
     )
     parser.add_argument(
         "--emit-checksums",
@@ -1005,12 +1014,6 @@ def main() -> None:
         except ValueError:
             print("[ERROR] FORS33_MAX_EXPOSURE must be a float.", file=sys.stderr)
             sys.exit(2)
-    if os.environ.get("FORS33_WORKERS"):
-        try:
-            args.workers = int(os.environ["FORS33_WORKERS"].strip())
-        except ValueError:
-            print("[ERROR] FORS33_WORKERS must be an integer.", file=sys.stderr)
-            sys.exit(2)
     if os.environ.get("FORS33_MAX_DEPTH"):
         try:
             args.max_depth = int(os.environ["FORS33_MAX_DEPTH"].strip())
@@ -1052,10 +1055,11 @@ def main() -> None:
         )
         sys.exit(2)
 
-    if args.workers is not None and args.workers > 0:
-        effective_workers = min(64, int(args.workers))
-    else:
-        effective_workers = _default_worker_count()
+    try:
+        effective_workers = resolve_dpk_worker_count(args.workers)
+    except ValueError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(2)
 
     jsonl_stream = None
     jsonl_should_close = False

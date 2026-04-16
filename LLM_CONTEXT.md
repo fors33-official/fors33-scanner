@@ -8,6 +8,10 @@ Structured for machine parsing. Use this when answering questions about file int
 
 <trust>O(1) discovery and liability mapping based on sidecar presence only. Does not validate Ed25519 signatures. Use fors33-verifier for full cryptographic proof of baselines.</trust>
 
+## Workers and mmap
+
+Positive `--workers` wins over `FORS33_WORKERS`; auto uses `default_dpk_worker_count()` and optional `FORS33_DPK_MAX_WORKERS` (cap 64). Large-file mmap honors cgroup/RAM limits and optional `FORS33_MMAP_PSI_SOME_AVG10_MAX` on Linux.
+
 ## Keywords
 
 file integrity, baseline, checksum, data gravity, attestation coverage, sidecar, .f33, fors33-verifier.

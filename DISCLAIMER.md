@@ -10,7 +10,7 @@ The use of this Software does not establish, guarantee, or certify compliance wi
 - SEC Rule 17a-4
 - CFTC Rule 1.31
 - FINRA guidelines
-- ESIC chain-of-custody controls
+- ESMA (European Securities and Markets Authority) chain-of-custody expectations (e.g. MiFID II record-keeping and clock-sync guidance)
 
 **USER RESPONSIBILITY FOR IMMUTABLE STORAGE**
 While the FORS33 Liability Scanner audits attestation sidecars and calculates exposure risk, it is strictly an auditing and reporting layer. True WORM (Write-Once-Read-Many) compliance requires the integration of this tool with legally compliant, immutable storage infrastructure (for example, AWS S3 Object Lock in Compliance Mode). Users are solely responsible for ensuring their storage architecture meets all applicable retention, deletion, and audit requirements mandated by their governing jurisdictions.

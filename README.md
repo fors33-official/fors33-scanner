@@ -1,9 +1,9 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
-[![Release](https://img.shields.io/badge/release-0.5.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
+[![Release](https://img.shields.io/badge/release-0.6.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
-[![Docker Tag](https://img.shields.io/badge/docker-0.5.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
+[![Docker Tag](https://img.shields.io/badge/docker-0.6.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
 
@@ -75,7 +75,11 @@ Record TSA endpoint for tooling that reads `FORS33_TSA_URL`:
 fors33-scanner --tsa-url https://tsa.example.com/rfc3161
 ```
 
-`FORS33_WORKERS` overrides `--workers` after CLI parse. Default worker count follows `FORS33_EXTENSION_MODE` (4 workers) or `min(32, cpu+4)`; explicit positive values are capped at 64.
+Worker count: **positive `--workers`** wins; otherwise a **positive `FORS33_WORKERS`**; otherwise **`default_dpk_worker_count()`** (uses `cpu_count` and optional **`FORS33_DPK_MAX_WORKERS`**). Non-positive values mean auto. Hard cap **64**.
+
+Large-file hashing uses **`FORS33_MMAP_MIN_MB`** / **`FORS33_MMAP_MAX_MB`** (defaults `500` / `4000`), clamped to cgroup/RAM ceiling on Linux; optional **`FORS33_MMAP_PSI_SOME_AVG10_MAX`** disables mmap under memory pressure.
+
+For production Docker or CI, **pin** a **semver image tag** or **immutable digest** instead of relying on `:latest` alone.
 
 Generate checksum baseline (sha256, sha512, or blake3 per --algo):
 
@@ -135,7 +139,7 @@ Default human output (mathematical only):
 ## Release model
 
 - Docker publish is manual via `workflow_dispatch` with explicit `version` and `push_latest` inputs.
-- Use `v0.5.0` style version tags and `latest` only when manually approved.
+- Use `v0.6.0` style version tags and `latest` only when manually approved.
 
 ## Requirements
 

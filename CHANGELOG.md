@@ -2,6 +2,16 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [0.6.0] - 2026-04-16
+
+### Added
+
+- **`hash_core`**: cgroup v2/v1 + visible RAM mmap ceiling, `FORS33_MMAP_MIN_MB` / `FORS33_MMAP_MAX_MB` clamp, optional `FORS33_MMAP_PSI_SOME_AVG10_MAX`, whole-file mmap gating, `default_dpk_worker_count()` with `FORS33_DPK_MAX_WORKERS` (no read-throttle API in scanner).
+
+### Changed
+
+- **Workers**: positive `--workers` wins; else positive `FORS33_WORKERS`; else `default_dpk_worker_count()`; cap **64**; removed **`FORS33_EXTENSION_MODE`**; `FORS33_WORKERS` no longer overrides a positive CLI value.
+
 ## [0.5.0] - 2026-03-31
 
 ### Added
@@ -49,7 +59,7 @@ All notable changes to fors33-scanner are documented here.
 
 ### Added
 
-- **--compliance-report**: SEC/ESIC exposure text behind flag; default human output strictly mathematical (File Count, Total Bytes, Attested/Unattested, Elapsed).
+- **--compliance-report**: SEC/ESMA exposure text behind flag; default human output strictly mathematical (File Count, Total Bytes, Attested/Unattested, Elapsed).
 - **--emit-checksums**: Renamed from --emit-sha256sum; supports sha256, sha512, blake3 in Hash Filename format. --emit-sha256sum retained as deprecated alias.
 - **Multi-root baselines**: JSON schema supports `roots` and per-file `root_index`; backward compatible with single-root `root`.
 - **Environment variables**: FORS33_ALGO, FORS33_THRESHOLD_MB, FORS33_ROOT, FORS33_FOLLOW_SYMLINKS, FORS33_IGNORE_PATTERN, FORS33_EXCLUDE_DIR with strict boolean parser.
