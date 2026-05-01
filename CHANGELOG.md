@@ -2,6 +2,25 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [0.7.0] - 2026-05-01
+
+### Added
+
+- **Single-file scanning**: Scanner now accepts individual file paths in addition to directories, enabling direct scanning of specific files without directory traversal.
+- **Sidecar parity**: Single-file mode recognizes all attestation sidecar extensions (`.f33`, `.sig`, `.asc`, `.sha256`, `.sha512`, `.blake3`, `.md5`, `.pem`) for behavioral parity with directory scanning.
+- **Baseline generation support**: Single-file scanning works with all baseline output formats (--emit-checksums, --emit-csv, --emit-json, --emit-jsonl).
+
+### Changed
+
+- **execute_scan() routing**: Modified to check if each root is a file or directory using `os.path.isfile()`, routing to direct processing for files and existing traversal for directories.
+- **Zero-byte file handling**: Threshold check uses `>=` operator to correctly handle zero-byte files when threshold is 0.0 MB.
+- **Symlink handling**: Single-file mode follows symlinks by default (consistent with `--follow-symlinks` parameter), processing the target file.
+
+### Security
+
+- **Single-file error handling**: Wraps `os.stat()` calls in try...except OSError to handle permission denied gracefully, incrementing `skipped_files` instead of crashing.
+- **Strict audit mode**: Re-raises file access errors as `StrictAuditFatal` when `--strict-audit` is enabled for audit compliance.
+
 ## [0.6.0] - 2026-04-16
 
 ### Added

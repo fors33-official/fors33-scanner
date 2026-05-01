@@ -715,32 +715,91 @@ def execute_scan(
         stats = ScanStats(roots=roots_abs)
         baseline_start = time.time()
         for root_idx, root in enumerate(roots_abs):
-            root_ignore = base_ignore + _load_f33ignore_patterns(root)
-            walk_stats, candidates = _walk_and_collect(
-                root,
-                threshold_bytes,
-                root_ignore,
-                exclude_set,
-                follow_symlinks,
-                strict_audit=strict_audit,
-                max_depth=max_depth,
-            )
-            stats.files_scanned += walk_stats.files_scanned
-            stats.candidate_files += walk_stats.candidate_files
-            stats.total_bytes += walk_stats.total_bytes
-            stats.attested_files += walk_stats.attested_files
-            stats.attested_bytes += walk_stats.attested_bytes
-            stats.unattested_files += walk_stats.unattested_files
-            stats.unattested_bytes += walk_stats.unattested_bytes
-            stats.attested_f33_files += walk_stats.attested_f33_files
-            stats.attested_f33_bytes += walk_stats.attested_f33_bytes
-            stats.attested_external_files += walk_stats.attested_external_files
-            stats.attested_external_bytes += walk_stats.attested_external_bytes
-            stats.skipped_files += walk_stats.skipped_files
-            for row in walk_stats.unverified_paths_sample:
-                stats.add_unverified_sample(row["path"], row.get("status", "UNSEALED"))
-            for norm_rel, full_path, size, mtime in candidates:
-                all_candidates.append((root_idx, norm_rel, full_path, size, mtime))
+            # Check if root is a single file
+            if os.path.isfile(root):
+                root_ignore = base_ignore + _load_f33ignore_patterns(os.path.dirname(root))
+                try:
+                    st = os.stat(path_for_kernel(root), follow_symlinks=follow_symlinks)
+                except OSError as e:
+                    if strict_audit and _is_strict_audit_io_error(e):
+                        raise StrictAuditFatal(f"Inaccessible file (strict audit): {root}: {e}") from e
+                    stats.skipped_files += 1
+                    continue
+                
+                size = st.st_size
+                if size < threshold_bytes:
+                    stats.skipped_files += 1
+                    continue
+                
+                # Check for sidecars
+                file_dir = os.path.dirname(root)
+                file_name = os.path.basename(root)
+                has_attestation = False
+                has_f33 = False
+                has_external = False
+                
+                for ext in _ATT_EXTS:
+                    sidecar_path = os.path.join(file_dir, f"{file_name}{ext}")
+                    if os.path.isfile(sidecar_path):
+                        has_attestation = True
+                        if ext == _F33_EXT:
+                            has_f33 = True
+                        else:
+                            has_external = True
+                        break
+                
+                # Update stats
+                stats.files_scanned += 1
+                stats.candidate_files += 1
+                stats.total_bytes += size
+                
+                if has_f33:
+                    stats.attested_f33_files += 1
+                    stats.attested_f33_bytes += size
+                    stats.attested_files += 1
+                    stats.attested_bytes += size
+                elif has_external:
+                    stats.attested_external_files += 1
+                    stats.attested_external_bytes += size
+                    stats.attested_files += 1
+                    stats.attested_bytes += size
+                else:
+                    stats.unattested_files += 1
+                    stats.unattested_bytes += size
+                    norm_rel = os.path.basename(root).replace("\\", "/")
+                    stats.add_unverified_sample(norm_rel, "UNSEALED")
+                
+                # Add to candidates for hashing
+                norm_rel = os.path.basename(root).replace("\\", "/")
+                all_candidates.append((root_idx, norm_rel, root, size, st.st_mtime))
+            else:
+                # Directory: use existing _walk_and_collect
+                root_ignore = base_ignore + _load_f33ignore_patterns(root)
+                walk_stats, candidates = _walk_and_collect(
+                    root,
+                    threshold_bytes,
+                    root_ignore,
+                    exclude_set,
+                    follow_symlinks,
+                    strict_audit=strict_audit,
+                    max_depth=max_depth,
+                )
+                stats.files_scanned += walk_stats.files_scanned
+                stats.candidate_files += walk_stats.candidate_files
+                stats.total_bytes += walk_stats.total_bytes
+                stats.attested_files += walk_stats.attested_files
+                stats.attested_bytes += walk_stats.attested_bytes
+                stats.unattested_files += walk_stats.unattested_files
+                stats.unattested_bytes += walk_stats.unattested_bytes
+                stats.attested_f33_files += walk_stats.attested_f33_files
+                stats.attested_f33_bytes += walk_stats.attested_f33_bytes
+                stats.attested_external_files += walk_stats.attested_external_files
+                stats.attested_external_bytes += walk_stats.attested_external_bytes
+                stats.skipped_files += walk_stats.skipped_files
+                for row in walk_stats.unverified_paths_sample:
+                    stats.add_unverified_sample(row["path"], row.get("status", "UNSEALED"))
+                for norm_rel, full_path, size, mtime in candidates:
+                    all_candidates.append((root_idx, norm_rel, full_path, size, mtime))
         stats.elapsed_seconds = time.time() - baseline_start
         records = _hash_candidates_multi(
             all_candidates,
@@ -753,15 +812,84 @@ def execute_scan(
             record_event_callback=record_event_callback,
         )
     else:
-        stats = scan_roots(
-            roots_abs,
-            threshold_mb,
-            ignore_patterns=base_ignore,
-            exclude_dirs=exclude_set,
-            follow_symlinks=follow_symlinks,
-            strict_audit=strict_audit,
-            max_depth=max_depth,
-        )
+        stats = ScanStats(roots=roots_abs)
+        start = time.time()
+        extra_exclude_dirs: Set[str] = set(exclude_dirs or [])
+        base_ignore_patterns: List[str] = list(ignore_patterns or [])
+        
+        for root in roots_abs:
+            # Check if root is a single file
+            if os.path.isfile(root):
+                root_ignore = base_ignore + _load_f33ignore_patterns(os.path.dirname(root))
+                try:
+                    st = os.stat(path_for_kernel(root), follow_symlinks=follow_symlinks)
+                except OSError as e:
+                    if strict_audit and _is_strict_audit_io_error(e):
+                        raise StrictAuditFatal(f"Inaccessible file (strict audit): {root}: {e}") from e
+                    stats.skipped_files += 1
+                    continue
+                
+                size = st.st_size
+                if size < threshold_bytes:
+                    stats.skipped_files += 1
+                    continue
+                
+                # Check for sidecars
+                file_dir = os.path.dirname(root)
+                file_name = os.path.basename(root)
+                has_attestation = False
+                has_f33 = False
+                has_external = False
+                
+                for ext in _ATT_EXTS:
+                    sidecar_path = os.path.join(file_dir, f"{file_name}{ext}")
+                    if os.path.isfile(sidecar_path):
+                        has_attestation = True
+                        if ext == _F33_EXT:
+                            has_f33 = True
+                        else:
+                            has_external = True
+                        break
+                
+                # Update stats
+                stats.files_scanned += 1
+                stats.candidate_files += 1
+                stats.total_bytes += size
+                
+                if has_f33:
+                    stats.attested_f33_files += 1
+                    stats.attested_f33_bytes += size
+                    stats.attested_files += 1
+                    stats.attested_bytes += size
+                elif has_external:
+                    stats.attested_external_files += 1
+                    stats.attested_external_bytes += size
+                    stats.attested_files += 1
+                    stats.attested_bytes += size
+                else:
+                    stats.unattested_files += 1
+                    stats.unattested_bytes += size
+                    norm_rel = os.path.basename(root).replace("\\", "/")
+                    stats.add_unverified_sample(norm_rel, "UNSEALED")
+            else:
+                # Directory: use existing scan_roots logic
+                root_patterns = base_ignore_patterns + _load_f33ignore_patterns(root)
+                visited_dirs: Set[tuple[int, int]] = set()
+                _scan_dir(
+                    root,
+                    root,
+                    threshold_bytes,
+                    stats,
+                    root_patterns,
+                    extra_exclude_dirs,
+                    follow_symlinks,
+                    visited_dirs,
+                    set() if follow_symlinks else None,
+                    strict_audit=strict_audit,
+                    max_depth=max_depth,
+                )
+        
+        stats.elapsed_seconds = time.time() - start
         records = []
     return stats, records
 

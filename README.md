@@ -1,9 +1,9 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
-[![Release](https://img.shields.io/badge/release-0.6.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
+[![Release](https://img.shields.io/badge/release-0.7.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
-[![Docker Tag](https://img.shields.io/badge/docker-0.6.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
+[![Docker Tag](https://img.shields.io/badge/docker-0.7.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
 
@@ -68,6 +68,20 @@ Strict audit (fail on permission or file-lock errors instead of skipping):
 ```bash
 fors33-scanner --root /data --strict-audit
 ```
+
+**Single-file scanning:**
+
+```bash
+# Scan a single file
+fors33-scanner --root /path/to/file.csv
+
+# Scan a single file with baseline generation
+fors33-scanner --root /path/to/file.csv --emit-checksums baseline.txt
+
+# Scan a single file with JSON manifest
+fors33-scanner --root /path/to/file.csv --emit-json manifest.json
+```
+Single-file mode accepts individual file paths in addition to directories, enabling direct scanning of specific files without directory traversal. Recognizes all attestation sidecar extensions (.f33, .sig, .asc, .sha256, .sha512, .blake3, .md5, .pem) for behavioral parity with directory scanning.
 
 Record TSA endpoint for tooling that reads `FORS33_TSA_URL`:
 
@@ -139,7 +153,7 @@ Default human output (mathematical only):
 ## Release model
 
 - Docker publish is manual via `workflow_dispatch` with explicit `version` and `push_latest` inputs.
-- Use `v0.6.0` style version tags and `latest` only when manually approved.
+- Use `v0.7.0` style version tags and `latest` only when manually approved.
 
 ## Requirements
 
