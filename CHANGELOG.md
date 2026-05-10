@@ -2,6 +2,33 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [0.8.0] - 2026-05-10
+
+### Added
+
+- **`_scan_single_file`**: Single-file roots use the same classification path as the Docker extension (stat with **`follow_symlinks=False`**, **`os.scandir`** + **`is_file(follow_symlinks=False)`** for sibling discovery, skip when the scan root basename is itself a sidecar suffix).
+- **`.blake3` sidecars**: Included in **`_ATT_EXTS`** so BLAKE3 sibling files count as external attestation coverage (README already listed `.blake3`).
+
+### Changed
+
+- **`scan_roots`**: File roots route through **`_scan_single_file`** instead of only directory walks.
+- **`execute_scan`**: Single-file baseline and stats paths delegate to **`_scan_single_file`**; below-threshold files no longer increment **`skipped_files`** (silent return, extension-style).
+- **Single-file `stat`**: Uses **`follow_symlinks=False`** for the target file; directory traversal still follows symlinks when **`--follow-symlinks`** is set.
+
+## [0.7.1] - 2026-05-10
+
+### Added
+
+- **`ScanStats.add_unverified_sample(..., *, has_sidecar=False)`**: Each unverified sample dict now includes `has_sidecar` as `"true"` or `"false"` for downstream re-seal UX (matches extension record shape).
+
+### Changed
+
+- **Docker publish workflow**: Buildx `sbom: true` and `provenance: mode=max` on versioned and `:latest` pushes; `id-token: write` for attestations.
+
+### Security
+
+- Supply chain: OCI SBOM and SLSA provenance attachments on GHCR/Docker Hub images from the publish workflow.
+
 ## [0.7.0] - 2026-05-01
 
 ### Added

@@ -1,17 +1,49 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
-[![Release](https://img.shields.io/badge/release-0.7.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
+[![Release](https://img.shields.io/badge/release-0.8.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
-[![Docker Tag](https://img.shields.io/badge/docker-0.7.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
+[![Docker Tag](https://img.shields.io/badge/docker-0.8.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
 
-High-speed file integrity and baseline scanner. Walks one or more roots, measures data gravity (bytes), and classifies large files as attested or unattested based on sibling sidecar presence (.f33, .sig, .asc, .sha256, .sha512, .md5, .pem). Emits checksum baselines (Hash Filename format), CSV, or JSON for use with fors33-verifier.
+High-speed file integrity and baseline scanner. Walks one or more roots, measures data gravity (bytes), and classifies large files as attested or unattested based on sibling sidecar presence (.f33, .sig, .asc, .sha256, .sha512, .blake3, .md5, .pem). Emits checksum baselines (Hash Filename format), CSV, or JSON for use with fors33-verifier.
 
 **Trust model:** The scanner is an O(1) discovery and liability mapping tool based on sidecar presence only. It does not validate Ed25519 signatures or cryptographic proof of baselines. For full cryptographic verification, use fors33-verifier.
 
 For machine parsing, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
+
+<details>
+<summary><strong>Release notes &amp; version history</strong></summary>
+
+### 0.8.0 (2026-05-10)
+
+- **Single-file parity** with the Docker extension: `_scan_single_file` uses **`stat(..., follow_symlinks=False)`**, **`os.scandir`** sibling discovery with **`is_file(follow_symlinks=False)`**, skips when the **root basename** is itself a recognized sidecar suffix, and applies to **`scan_roots`** as well as **`execute_scan`**.
+- **`.blake3`** is part of **`_ATT_EXTS`** so BLAKE3 companions classify as external attestation coverage.
+- Below-threshold single-file paths no longer bump **`skipped_files`** (silent skip, extension-style).
+
+### 0.7.1 (2026-05-10)
+
+- **`has_sidecar` on unverified samples**: `ScanStats.add_unverified_sample(..., *, has_sidecar=False)` records `"has_sidecar": "true"` or `"false"` on each sampled unattested path (same shape as the L3dgr extension) for downstream re-seal UX.
+- **Supply chain**: Docker images from `publish-fors33-scanner` attach **SBOM** and **SLSA provenance** (`sbom: true`, `provenance: mode=max`). Pin by digest for regulated deployments.
+
+### 0.7.0 (2026-05-01)
+
+- Single-file scanning roots, sidecar parity (`.f33`, `.sig`, `.asc`, checksum sidecars, etc.), baseline/JSON/JSONL on single-file paths, stricter `--strict-audit` and zero-byte threshold behavior.
+
+### 0.6.0 (2026-04-16)
+
+- `hash_core` mmap ceilings, cgroup alignment, worker cap **64**, `default_dpk_worker_count()` / `FORS33_DPK_MAX_WORKERS`.
+
+### 0.5.0 and 0.4.0
+
+- `--strict-audit`, `unverified_paths_sample`, `--tsa-url`, JSONL multi-root metadata, `--max-exposure`, `--emit-jsonl`, `--max-depth`. Full text: [CHANGELOG.md](CHANGELOG.md).
+
+### Release model
+
+- Docker publish is **manual** via GitHub Actions **`workflow_dispatch`** with explicit **`version`** (no leading `v`, e.g. `0.8.0`) and **`push_latest`**; it does **not** run automatically on git tags alone. PyPI releases are Maintainer-driven (`python -m build`, `twine upload`) unless your org wires otherwise.
+
+</details>
 
 ## Install
 
@@ -149,11 +181,7 @@ Default human output (mathematical only):
 - `timestamp` represents hash completion time.
 - Final line is `scan_summary` with aggregate stats and scan parameters.
 - If `--emit-jsonl -` and `--json` are both requested, JSONL takes precedence on `stdout`.
-
-## Release model
-
-- Docker publish is manual via `workflow_dispatch` with explicit `version` and `push_latest` inputs.
-- Use `v0.7.0` style version tags and `latest` only when manually approved.
+- **`unverified_paths_sample`** entries (JSON/JSONL consumers): each row includes **`path`**, **`status`**, and **`has_sidecar`** (`"true"` / `"false"`) since **0.7.1** for integration with seal/re-seal workflows.
 
 ## Requirements
 
