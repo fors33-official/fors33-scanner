@@ -77,6 +77,29 @@ _ATT_EXTS = (
 )
 _EXTERNAL_EXTS = tuple(ext for ext in _ATT_EXTS if ext != _F33_EXT)
 
+
+def _sidecar_suffix_tuples(*, recognize_blake3_sidecar: bool) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return (all attestation suffixes including .f33, external-only suffixes) for sidecar discovery."""
+    att = _ATT_EXTS if recognize_blake3_sidecar else tuple(e for e in _ATT_EXTS if e != ".blake3")
+    ext_only = tuple(e for e in att if e != _F33_EXT)
+    return att, ext_only
+
+
+def _resolve_scanner_compat_kwargs(
+    *,
+    legacy_scanner_stats: bool,
+    below_threshold_single_file_counts_skipped: bool,
+    recognize_blake3_sidecar: bool,
+) -> tuple[bool, bool]:
+    """
+    FORS33_SCANNER_LEGACY_STATS=1 or legacy_scanner_stats applies pre-0.8.0 accounting:
+    single-file below-threshold bumps skipped_files; .blake3 siblings are not counted as attestation coverage.
+    """
+    if legacy_scanner_stats or _env_bool("FORS33_SCANNER_LEGACY_STATS"):
+        return (True, False)
+    return (below_threshold_single_file_counts_skipped, recognize_blake3_sidecar)
+
+
 LEGAL_BANNER_LINES = (
     "[LEGAL]  FORS33 Liability Scanner",
     "[LEGAL]  This scanner quantifies attestation coverage only.",
@@ -242,6 +265,7 @@ def _scan_dir(
     visited_files: Set[tuple[int, int]] | None = None,
     strict_audit: bool = False,
     max_depth: int | None = None,
+    recognize_blake3_sidecar: bool = True,
 ) -> None:
     try:
         st_dir = os.stat(path_for_kernel(path), follow_symlinks=False)
@@ -262,6 +286,8 @@ def _scan_dir(
         if strict_audit and _is_strict_audit_io_error(e):
             raise StrictAuditFatal(f"Inaccessible directory (strict audit): {path}: {e}") from e
         return
+
+    att_exts, external_exts = _sidecar_suffix_tuples(recognize_blake3_sidecar=recognize_blake3_sidecar)
 
     # Build an in-memory set of filenames in this directory so we can check for
     # potential sidecars in O(1) without extra disk I/O.
@@ -292,11 +318,12 @@ def _scan_dir(
                 visited_files,
                 strict_audit=strict_audit,
                 max_depth=max_depth,
+                recognize_blake3_sidecar=recognize_blake3_sidecar,
             )
         elif entry.is_file(follow_symlinks=follow_symlinks):
             stats.files_scanned += 1
             # Skip sidecar files themselves; we classify their parents.
-            if any(name.endswith(ext) for ext in _ATT_EXTS):
+            if any(name.endswith(ext) for ext in att_exts):
                 continue
             rel_path = os.path.relpath(path_from_kernel(entry_path), path_from_kernel(root))
             if _matches_ignore(rel_path, ignore_patterns):
@@ -325,7 +352,7 @@ def _scan_dir(
             has_f33 = f"{name}{_F33_EXT}" in filenames
             has_external = False
             if not has_f33:
-                for ext in _EXTERNAL_EXTS:
+                for ext in external_exts:
                     if f"{name}{ext}" in filenames:
                         has_external = True
                         break
@@ -353,8 +380,12 @@ def _scan_single_file(
     stats: ScanStats,
     ignore_patterns: List[str],
     strict_audit: bool = False,
+    *,
+    below_threshold_counts_skipped: bool = False,
+    recognize_blake3_sidecar: bool = True,
 ) -> None:
-    """Scan one file path (same semantics as Docker extension `_scan_single_file`)."""
+    """Scan one file path (same semantics as Docker extension `_scan_single_file` by default)."""
+    att_exts, external_exts = _sidecar_suffix_tuples(recognize_blake3_sidecar=recognize_blake3_sidecar)
     try:
         st = os.stat(path_for_kernel(file_path), follow_symlinks=False)
     except OSError as e:
@@ -366,7 +397,7 @@ def _scan_single_file(
     stats.files_scanned += 1
 
     name = os.path.basename(file_path)
-    if any(name.endswith(ext) for ext in _ATT_EXTS):
+    if any(name.endswith(ext) for ext in att_exts):
         return
 
     rel_path = os.path.relpath(path_from_kernel(file_path), path_from_kernel(root))
@@ -377,6 +408,8 @@ def _scan_single_file(
 
     size = st.st_size
     if size < threshold_bytes:
+        if below_threshold_counts_skipped:
+            stats.skipped_files += 1
         return
 
     stats.candidate_files += 1
@@ -396,7 +429,7 @@ def _scan_single_file(
     has_f33 = f"{name}{_F33_EXT}" in filenames
     has_external = False
     if not has_f33:
-        for ext in _EXTERNAL_EXTS:
+        for ext in external_exts:
             if f"{name}{ext}" in filenames:
                 has_external = True
                 break
@@ -425,7 +458,16 @@ def scan_roots(
     follow_symlinks: bool = False,
     strict_audit: bool = False,
     max_depth: int | None = None,
+    *,
+    legacy_scanner_stats: bool = False,
+    below_threshold_single_file_counts_skipped: bool = False,
+    recognize_blake3_sidecar: bool = True,
 ) -> ScanStats:
+    b_skip, blake3_ok = _resolve_scanner_compat_kwargs(
+        legacy_scanner_stats=legacy_scanner_stats,
+        below_threshold_single_file_counts_skipped=below_threshold_single_file_counts_skipped,
+        recognize_blake3_sidecar=recognize_blake3_sidecar,
+    )
     norm_roots = [os.path.abspath(r) for r in (list(roots) or [os.getcwd()])]
     stats = ScanStats(roots=norm_roots)
     threshold_bytes = int(threshold_mb * 1024 * 1024)
@@ -445,6 +487,8 @@ def scan_roots(
                 stats,
                 root_patterns,
                 strict_audit=strict_audit,
+                below_threshold_counts_skipped=b_skip,
+                recognize_blake3_sidecar=blake3_ok,
             )
         else:
             _scan_dir(
@@ -459,6 +503,7 @@ def scan_roots(
                 set() if follow_symlinks else None,
                 strict_audit=strict_audit,
                 max_depth=max_depth,
+                recognize_blake3_sidecar=blake3_ok,
             )
 
     stats.elapsed_seconds = time.time() - start
@@ -473,11 +518,13 @@ def _walk_and_collect(
     follow_symlinks: bool,
     strict_audit: bool = False,
     max_depth: int | None = None,
+    recognize_blake3_sidecar: bool = True,
 ) -> tuple[ScanStats, List[tuple[str, str, int, float]]]:
     """
     Single directory walk that collects scan stats and candidate files for baseline.
     Returns (stats, candidates). No second os.walk; skipped_files counted once.
     """
+    att_exts, external_exts = _sidecar_suffix_tuples(recognize_blake3_sidecar=recognize_blake3_sidecar)
     root_abs = os.path.abspath(root)
     stats = ScanStats(roots=[root_abs])
     visited_dirs: Set[tuple[int, int]] = set()
@@ -512,7 +559,7 @@ def _walk_and_collect(
                 dirnames[:] = []
         filenames_set = set(filenames)
         for name in filenames:
-            if any(name.endswith(ext) for ext in _ATT_EXTS):
+            if any(name.endswith(ext) for ext in att_exts):
                 continue
             full_path = os.path.join(dirpath, name)
             rel_path = os.path.relpath(path_from_kernel(full_path), path_from_kernel(root_abs))
@@ -541,7 +588,7 @@ def _walk_and_collect(
             stats.total_bytes += size
             has_f33 = f"{name}{_F33_EXT}" in filenames_set
             has_external = not has_f33 and any(
-                f"{name}{ext}" in filenames_set for ext in _EXTERNAL_EXTS
+                f"{name}{ext}" in filenames_set for ext in external_exts
             )
             if has_f33:
                 stats.attested_f33_files += 1
@@ -788,6 +835,10 @@ def execute_scan(
     max_depth: int | None = None,
     max_workers: int | None = None,
     record_event_callback: Callable[[dict], None] | None = None,
+    *,
+    legacy_scanner_stats: bool = False,
+    below_threshold_single_file_counts_skipped: bool = False,
+    recognize_blake3_sidecar: bool = True,
 ) -> tuple[ScanStats, List[Dict[str, object]]]:
     """
     Library entry point: scan roots and optionally compute baseline.
@@ -797,6 +848,11 @@ def execute_scan(
     progress events like {"event":"progress","file":"rel/path","pct":45} for
     headless/WebSocket streaming.
     """
+    b_skip, blake3_ok = _resolve_scanner_compat_kwargs(
+        legacy_scanner_stats=legacy_scanner_stats,
+        below_threshold_single_file_counts_skipped=below_threshold_single_file_counts_skipped,
+        recognize_blake3_sidecar=recognize_blake3_sidecar,
+    )
     roots_abs = [os.path.abspath(r) for r in roots]
     threshold_bytes = int(threshold_mb * 1024 * 1024)
     base_ignore = list(ignore_patterns or [])
@@ -824,6 +880,8 @@ def execute_scan(
                     stats,
                     root_ignore,
                     strict_audit=strict_audit,
+                    below_threshold_counts_skipped=b_skip,
+                    recognize_blake3_sidecar=blake3_ok,
                 )
                 if stats.candidate_files > before_cf:
                     norm_rel = os.path.basename(root).replace("\\", "/")
@@ -841,6 +899,7 @@ def execute_scan(
                     follow_symlinks,
                     strict_audit=strict_audit,
                     max_depth=max_depth,
+                    recognize_blake3_sidecar=blake3_ok,
                 )
                 stats.files_scanned += walk_stats.files_scanned
                 stats.candidate_files += walk_stats.candidate_files
@@ -885,6 +944,8 @@ def execute_scan(
                     stats,
                     root_patterns,
                     strict_audit=strict_audit,
+                    below_threshold_counts_skipped=b_skip,
+                    recognize_blake3_sidecar=blake3_ok,
                 )
             else:
                 # Directory: use existing scan_roots logic
@@ -902,6 +963,7 @@ def execute_scan(
                     set() if follow_symlinks else None,
                     strict_audit=strict_audit,
                     max_depth=max_depth,
+                    recognize_blake3_sidecar=blake3_ok,
                 )
         
         stats.elapsed_seconds = time.time() - start
@@ -1128,6 +1190,14 @@ def main() -> None:
         action="store_true",
         help="Fail fast on permission or locking errors instead of skipping paths.",
     )
+    parser.add_argument(
+        "--legacy-scanner-stats",
+        action="store_true",
+        help=(
+            "Pre-0.8.0 counter semantics: FORS33_SCANNER_LEGACY_STATS bundle "
+            "(single-file below threshold counts as skipped_files; .blake3 siblings do not attest)."
+        ),
+    )
     args = parser.parse_args()
 
     if getattr(args, "tsa_url", None) and str(args.tsa_url).strip():
@@ -1235,6 +1305,7 @@ def main() -> None:
             max_depth=args.max_depth,
             max_workers=effective_workers,
             record_event_callback=_emit_jsonl_event if jsonl_stream is not None else None,
+            legacy_scanner_stats=args.legacy_scanner_stats,
         )
     except StrictAuditFatal as e:
         print(f"[ERROR] {e}", file=sys.stderr)

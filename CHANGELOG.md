@@ -2,6 +2,18 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [0.8.1] - 2026-05-10
+
+### Added
+
+- **`_resolve_scanner_compat_kwargs` / `_sidecar_suffix_tuples`**: optional pre-0.8.0 counter and sidecar-classification semantics.
+- **`--legacy-scanner-stats`** and **`FORS33_SCANNER_LEGACY_STATS`**: bundle **below-threshold single-file counts as `skipped_files`** and **ignore `.blake3` as external attestation**.
+- **`scan_roots`**, **`execute_scan`** (keyword-only): **`legacy_scanner_stats`**, **`below_threshold_single_file_counts_skipped`**, **`recognize_blake3_sidecar`** (discrete knobs; legacy bundle overrides when enabled).
+
+### Changed
+
+- **`_scan_dir`**, **`_walk_and_collect`**, **`_scan_single_file`**: thread **`recognize_blake3_sidecar`** for consistent BLAKE3 sidecar handling on directory and baseline walks.
+
 ## [0.8.0] - 2026-05-10
 
 ### Added

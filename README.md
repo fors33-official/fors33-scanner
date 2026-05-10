@@ -1,9 +1,9 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
-[![Release](https://img.shields.io/badge/release-0.8.0-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
+[![Release](https://img.shields.io/badge/release-0.8.1-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
-[![Docker Tag](https://img.shields.io/badge/docker-0.8.0%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
+[![Docker Tag](https://img.shields.io/badge/docker-0.8.1%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
 
@@ -15,6 +15,10 @@ For machine parsing, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
 <details>
 <summary><strong>Release notes &amp; version history</strong></summary>
+
+### 0.8.1 (2026-05-10)
+
+- **Backward-compatible stats (pre-0.8.0 accounting)**: **`--legacy-scanner-stats`** or **`FORS33_SCANNER_LEGACY_STATS=1`** restores single-file below-threshold **`skipped_files`** counting and treats **`.blake3`** siblings as **not** conferring external attestation coverage (library: **`legacy_scanner_stats`** bundles both; **`below_threshold_single_file_counts_skipped`** and **`recognize_blake3_sidecar`** remain available separately on **`scan_roots`** / **`execute_scan`**).
 
 ### 0.8.0 (2026-05-10)
 
@@ -41,7 +45,7 @@ For machine parsing, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
 ### Release model
 
-- Docker publish is **manual** via GitHub Actions **`workflow_dispatch`** with explicit **`version`** (no leading `v`, e.g. `0.8.0`) and **`push_latest`**; it does **not** run automatically on git tags alone. PyPI releases are Maintainer-driven (`python -m build`, `twine upload`) unless your org wires otherwise.
+- Docker publish is **manual** via GitHub Actions **`workflow_dispatch`** with explicit **`version`** (no leading `v`, e.g. `0.8.1`) and **`push_latest`**; it does **not** run automatically on git tags alone. PyPI releases are Maintainer-driven (`python -m build`, `twine upload`) unless your org wires otherwise.
 
 </details>
 
@@ -113,7 +117,15 @@ fors33-scanner --root /path/to/file.csv --emit-checksums baseline.txt
 # Scan a single file with JSON manifest
 fors33-scanner --root /path/to/file.csv --emit-json manifest.json
 ```
-Single-file mode accepts individual file paths in addition to directories, enabling direct scanning of specific files without directory traversal. Recognizes all attestation sidecar extensions (.f33, .sig, .asc, .sha256, .sha512, .blake3, .md5, .pem) for behavioral parity with directory scanning.
+Single-file mode accepts individual file paths in addition to directories, enabling direct scanning of specific files without directory traversal. By default it recognizes all attestation sidecar extensions (.f33, .sig, .asc, .sha256, .sha512, .blake3, .md5, .pem) for parity with directory scanning.
+
+Pre-0.8.0 stats (below-threshold single-file roots bump `skipped_files`, and `.blake3` siblings are not counted as external attestation):
+
+```bash
+fors33-scanner --root /data --legacy-scanner-stats
+```
+
+Equivalent: set **`FORS33_SCANNER_LEGACY_STATS=1`**.
 
 Record TSA endpoint for tooling that reads `FORS33_TSA_URL`:
 
