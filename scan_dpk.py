@@ -140,6 +140,7 @@ LEGAL_BANNER_LINES = (
     "[LEGAL]  This scanner quantifies attestation coverage only.",
     "[LEGAL]  Verify results in your chain-of-custody workflow.",
     "[LEGAL]  Do not treat summary output as cryptographic proof.",
+    "[LEGAL]  Full legal terms: https://fors33.com/legal",
     "[LEGAL]  Unauthorized use is prohibited.",
 )
 
@@ -1129,7 +1130,7 @@ def main() -> None:
         print(line, file=sys.stderr)
     parser = argparse.ArgumentParser(
         description=(
-            "FORS33 Liability Scanner: quantify attested vs unattested data bytes "
+            "Fors33 Liability Scanner: quantify attested vs unattested data bytes "
             "using .f33 sidecars."
         )
     )

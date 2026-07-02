@@ -11,7 +11,9 @@ High-speed file integrity and baseline scanner. Walks one or more roots, measure
 
 **Trust model:** The scanner is an O(1) discovery and liability mapping tool based on sidecar presence only. It does not validate Ed25519 signatures or cryptographic proof of baselines. For full cryptographic verification, use fors33-verifier.
 
-For machine parsing, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
+> **Legal:** Fors33 Liability Scanner quantifies attestation coverage only. It does not establish, guarantee, or certify regulatory compliance. See [DISCLAIMER.md](DISCLAIMER.md) and [full legal terms at fors33.com/legal](https://fors33.com/legal).
+
+For structured package context, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
 <details>
 <summary><strong>Release notes &amp; version history</strong></summary>
@@ -35,7 +37,7 @@ For machine parsing, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
 ### 0.8.0 (2026-05-10)
 
-- **Single-file parity** with the Docker extension: `_scan_single_file` uses **`stat(..., follow_symlinks=False)`**, **`os.scandir`** sibling discovery with **`is_file(follow_symlinks=False)`**, skips when the **root basename** is itself a recognized sidecar suffix, and applies to **`scan_roots`** as well as **`execute_scan`**.
+- **Single-file parity** with L3dgr: `_scan_single_file` uses **`stat(..., follow_symlinks=False)`**, **`os.scandir`** sibling discovery with **`is_file(follow_symlinks=False)`**, skips when the **root basename** is itself a recognized sidecar suffix, and applies to **`scan_roots`** as well as **`execute_scan`**.
 - **`.blake3`** is part of **`_ATT_EXTS`** so BLAKE3 companions classify as external attestation coverage.
 - Below-threshold single-file paths no longer bump **`skipped_files`** (silent skip, extension-style).
 
@@ -197,7 +199,16 @@ Default human output (mathematical only):
 - Scan-only: O(1) discovery; baseline generation uses streaming chunked hashing.
 - Excludes common dirs (.git, node_modules, venv, etc). Respects .f33ignore and --ignore-pattern / --exclude-dir.
 - Legal notice prints to `stderr` on startup so data/JSON streams on `stdout` remain parse-safe.
-- See `DISCLAIMER.md` for enterprise legal/regulatory boundaries.
+
+## Docker
+
+```bash
+docker run --rm ghcr.io/fors33-official/fors33-scanner:v0.8.4 --root /data --threshold-mb 1.0
+# or
+docker run --rm docker.io/fors33/fors33-scanner:v0.8.4 --root /data --json
+```
+
+Published images include **SBOM** and **build provenance** metadata (expand **Release notes & version history** near the top of this README). Pin a **version tag** or **immutable digest** in production pipelines.
 
 ## JSONL contract
 
@@ -214,4 +225,4 @@ Python 3.9+. Optional `blake3` for BLAKE3 hashing. Linux, macOS, Windows.
 
 ## License
 
-MIT License. See `LICENSE`.
+MIT License. See [LICENSE](LICENSE). Legal and regulatory boundaries: [DISCLAIMER.md](DISCLAIMER.md) and [fors33.com/legal](https://fors33.com/legal).
