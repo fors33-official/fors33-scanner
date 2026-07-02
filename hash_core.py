@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shared hashing utilities for fors33-scanner.
+Shared hashing utilities for scanner and verifier.
 
 Supports SHA-256 (default), SHA-512, MD5, SHA-1, and optional BLAKE3 with
 streaming, chunk-based hashing suitable for large files.
@@ -12,7 +12,50 @@ import mmap
 import os
 import re
 import sys
+import threading
+import time
 from typing import Callable, Iterable, Optional
+
+# Large background hashing: worker pools (scan_dpk / verify_dpk) plus this module's
+# token-bucket reader keep the extension UI responsive; no published MB/s SLA.
+
+# Global read-rate limit (bytes/sec) for chunked reads; None disables throttling.
+_io_bucket_lock = threading.Lock()
+_io_bps: Optional[float] = None
+_tb_tokens: float = 0.0
+_tb_last: float = 0.0
+
+
+def set_global_read_bytes_per_second(bps: Optional[float]) -> None:
+    """Configure daemon-wide disk read throttle (None = unlimited)."""
+    global _io_bps, _tb_tokens, _tb_last
+    with _io_bucket_lock:
+        _io_bps = None if bps is None or bps <= 0 else float(bps)
+        _tb_tokens = 0.0
+        _tb_last = time.monotonic()
+
+
+def _throttle_before_read(num_bytes: int) -> None:
+    """Block until token bucket allows reading num_bytes (coarse global cap)."""
+    global _tb_tokens, _tb_last
+    if num_bytes <= 0:
+        return
+    while True:
+        sleep_s = 0.0
+        with _io_bucket_lock:
+            bps = _io_bps
+            if bps is None:
+                return
+            now = time.monotonic()
+            elapsed = now - _tb_last
+            _tb_last = now
+            _tb_tokens = min(bps * 2.0, _tb_tokens + elapsed * bps)
+            if _tb_tokens >= num_bytes:
+                _tb_tokens -= float(num_bytes)
+                return
+            deficit = float(num_bytes) - _tb_tokens
+            sleep_s = min(0.25, max(0.001, deficit / bps))
+        time.sleep(sleep_s)
 
 try:
     import blake3  # type: ignore[attr-defined]
@@ -198,6 +241,116 @@ def _mmap_psi_disables_mmap() -> bool:
     return avg10 > cap
 
 
+def runtime_pids_headroom() -> tuple[int | None, int | None]:
+    """Return (pids.current, pids.max) for this process cgroup; None when unreadable."""
+    cg2 = _cgroup_v2_dir()
+    if not cg2:
+        return None, None
+    cur = _read_first_line_int_bytes(os.path.join(cg2, "pids.current"))
+    mx = _read_first_line_int_bytes(os.path.join(cg2, "pids.max"))
+    return cur, mx
+
+
+def runtime_memory_pressure_some_avg10() -> float | None:
+    return _cgroup_v2_memory_pressure_some_avg10()
+
+
+def t3thr_spawn_headroom_ok(
+    pending_spawns: int = 1,
+    *,
+    spawn_reserve_pids: int = 4,
+) -> tuple[bool, str | None]:
+    """
+    Return (ok, binding_reason) when the VM can admit ``pending_spawns`` more t3thr children.
+    binding_reason is ``pids`` or ``memory_pressure`` when ok is False.
+    """
+    need = max(1, int(pending_spawns))
+    if not sys.platform.startswith("linux"):
+        return True, None
+    cur, mx = runtime_pids_headroom()
+    reserve = 48
+    if cur is not None and mx is not None and mx > 0:
+        headroom = mx - cur - reserve
+        if headroom < spawn_reserve_pids * need:
+            return False, "pids"
+    psi_raw = os.environ.get("FORS33_STREAM_PSI_SOME_AVG10_MAX", "30").strip()
+    try:
+        psi_limit = float(psi_raw)
+    except ValueError:
+        psi_limit = 30.0
+    avg10 = runtime_memory_pressure_some_avg10()
+    if avg10 is not None and avg10 > psi_limit:
+        return False, "memory_pressure"
+    return True, None
+
+
+def effective_live_stream_max(
+    license_max: int,
+    active_non_file: int,
+    *,
+    spawn_reserve_pids: int = 4,
+) -> tuple[int, str | None]:
+    """
+    Total concurrent non-file live jobs allowed (min of license and VM headroom).
+    Returns (effective_max, vm_binding_reason) where reason is pids or memory_pressure.
+    """
+    lic_cap = max(0, int(license_max))
+    active = max(0, int(active_non_file))
+    if not sys.platform.startswith("linux"):
+        return lic_cap, None
+    effective = lic_cap
+    binding: str | None = None
+    cur, mx = runtime_pids_headroom()
+    reserve = 48
+    if cur is not None and mx is not None and mx > 0:
+        headroom = mx - cur - reserve
+        if headroom < spawn_reserve_pids:
+            if active < effective:
+                effective = active
+                binding = "pids"
+        else:
+            pid_slots = max(0, headroom // spawn_reserve_pids)
+            vm_cap = active + pid_slots
+            if vm_cap < effective:
+                effective = vm_cap
+                binding = "pids"
+    psi_raw = os.environ.get("FORS33_STREAM_PSI_SOME_AVG10_MAX", "30").strip()
+    try:
+        psi_limit = float(psi_raw)
+    except ValueError:
+        psi_limit = 30.0
+    avg10 = runtime_memory_pressure_some_avg10()
+    if avg10 is not None and avg10 > psi_limit and effective > active:
+        effective = active
+        binding = "memory_pressure"
+    return max(active, min(lic_cap, effective)), binding
+
+
+def soft_max_concurrent_file_jobs() -> int:
+    """Daemon-side file job ceiling under VM pressure (file bypasses license live cap)."""
+    base = 8
+    raw = os.environ.get("FORS33_SOFT_MAX_FILE_JOBS", "").strip()
+    if raw:
+        try:
+            base = max(1, int(raw))
+        except ValueError:
+            pass
+    if not sys.platform.startswith("linux"):
+        return base
+    avg10 = runtime_memory_pressure_some_avg10()
+    psi_raw = os.environ.get("FORS33_STREAM_PSI_SOME_AVG10_MAX", "30").strip()
+    try:
+        psi_limit = float(psi_raw)
+    except ValueError:
+        psi_limit = 30.0
+    if avg10 is not None and avg10 > psi_limit:
+        return min(base, 2)
+    cur, mx = runtime_pids_headroom()
+    if cur is not None and mx is not None and mx > 0 and (mx - cur) < 64:
+        return min(base, 2)
+    return base
+
+
 def _effective_mmap_bounds_bytes() -> tuple[int, int]:
     """
     Return (mmap_min_bytes, mmap_max_bytes) after cgroup/RAM ceiling and env overrides.
@@ -260,6 +413,11 @@ def hash_file(
         except OSError:
             pass
 
+    # Bounded mmap fast path:
+    # - whole-file only (start == 0, end is None)
+    # - total_bytes must be known and within cgroup/RAM-clamped bounds
+    # - optional PSI avg10 may disable mmap (FORS33_MMAP_PSI_SOME_AVG10_MAX)
+    # - on any mmap failure, fall back to the chunked reader below
     mmap_min, mmap_max = _effective_mmap_bounds_bytes()
     psi_mmap_off = _mmap_psi_disables_mmap()
     can_try_mmap = (
@@ -282,11 +440,13 @@ def hash_file(
                         progress_callback(total_bytes, total_bytes)
                 return hasher.hexdigest()
             except Exception:
+                # Fall through to chunked reading.
                 pass
         f.seek(start)
         if remaining is not None:
             while remaining > 0:
                 to_read = min(remaining, chunk_size)
+                _throttle_before_read(to_read)
                 n = f.readinto(memoryview(buffer)[:to_read])
                 if n <= 0:
                     break
@@ -297,6 +457,7 @@ def hash_file(
                     progress_callback(bytes_read, total_bytes)
         else:
             while True:
+                _throttle_before_read(chunk_size)
                 n = f.readinto(buffer)
                 if n <= 0:
                     break
@@ -332,3 +493,58 @@ def default_dpk_worker_count() -> int:
         except ValueError:
             pass
     return w
+
+
+# Epoch upload bundle companions (S3 PutObject basenames + dated live-root variants).
+# Not fors33-manifest sealed entries; epoch upload companion basenames (metrics-template.json,
+# matches ws_metrics_template.METRICS_TEMPLATE_FILENAME.
+_EPOCH_UPLOAD_COMPANION_EXACT: frozenset[str] = frozenset(
+    {
+        "metrics-template.json",
+        "integrity_provenance.json",
+        "epoch_attestation.json",
+        "epoch_attestation.sig",
+        "epoch_attestation_public.pem",
+    }
+)
+
+
+def is_epoch_upload_companion_basename(name: str) -> bool:
+    """True when basename is a non-sealed epoch bundle companion (observability or audit adjunct)."""
+    base = os.path.basename(str(name or "").strip())
+    if not base:
+        return False
+    if base in _EPOCH_UPLOAD_COMPANION_EXACT:
+        return True
+    if base.startswith("integrity_provenance_") and base.endswith(".json"):
+        return True
+    if base.startswith("epoch_attestation_") and (
+        base.endswith(".json") or base.endswith(".sig") or base.endswith("_public.pem")
+    ):
+        return True
+    return False
+
+
+def compute_baseline_merkle_root(records: list[dict], algo: str = "sha256") -> str:
+    """
+    Deterministic Merkle root over sorted scan baseline rows (path + digest leaves).
+    Returns empty string when records is empty.
+    """
+    if not records:
+        return ""
+    algo_norm = str(algo or "sha256").strip().lower() or "sha256"
+    leaves: list[str] = []
+    for rec in sorted(records, key=lambda r: str(r.get("path") or "")):
+        path = str(rec.get("path") or "")
+        digest = str(rec.get("digest") or "")
+        leaf_preimage = f"{algo_norm}:{path}:{digest}".encode("utf-8")
+        leaves.append(hashlib.sha256(leaf_preimage).hexdigest())
+    level = leaves
+    while len(level) > 1:
+        nxt: list[str] = []
+        for i in range(0, len(level), 2):
+            left = level[i]
+            right = level[i + 1] if i + 1 < len(level) else left
+            nxt.append(hashlib.sha256(f"{left}{right}".encode("ascii")).hexdigest())
+        level = nxt
+    return level[0]

@@ -1,9 +1,9 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
-[![Release](https://img.shields.io/badge/release-0.8.1-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
+[![Release](https://img.shields.io/badge/release-v0.8.4-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
-[![Docker Tag](https://img.shields.io/badge/docker-0.8.1%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
+[![Docker Tag](https://img.shields.io/badge/docker-v0.8.4%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
 
@@ -15,6 +15,19 @@ For machine parsing, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
 <details>
 <summary><strong>Release notes &amp; version history</strong></summary>
+
+### v0.8.4 (2026-07-02)
+
+- **Baseline single-file roots**: `execute_scan(..., wants_baseline=True)` on a file path now emits baseline records (previously returned zero candidates).
+
+### v0.8.3 (2026-07-02)
+
+- **Unified release semver**: Git tags, PyPI, `workflow_dispatch` `version`, and Docker images all use `vX.Y.Z` (e.g. `v0.8.3`, `:v0.8.3`).
+
+### v0.8.2 (2026-07-02)
+
+- **BagIt scan alignment** with L3dgr extension: shared `manifest_core` helpers; payload members under BagIt `data/` count as attested during directory walks.
+- **`is_epoch_upload_companion_basename`** in `hash_core` (epoch bundle companion skips).
 
 ### 0.8.1 (2026-05-10)
 
@@ -45,7 +58,7 @@ For machine parsing, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
 ### Release model
 
-- Docker publish is **manual** via GitHub Actions **`workflow_dispatch`** with explicit **`version`** (no leading `v`, e.g. `0.8.1`) and **`push_latest`**; it does **not** run automatically on git tags alone. PyPI releases are Maintainer-driven (`python -m build`, `twine upload`) unless your org wires otherwise.
+- Docker publish is **manual** via GitHub Actions **`workflow_dispatch`** with explicit **`version`** = `vX.Y.Z` (e.g. `v0.8.3`) and **`push_latest`**; bare `X.Y.Z` is **rejected**. It does **not** run automatically on git tags alone. PyPI releases use the same `vX.Y.Z` string in `pyproject.toml` (`python -m build`, `twine upload`).
 
 </details>
 

@@ -2,7 +2,28 @@
 
 All notable changes to fors33-scanner are documented here.
 
-## [0.8.1] - 2026-05-10
+## [v0.8.4] - 2026-07-02
+
+### Fixed
+
+- **`execute_scan` baseline for single-file roots**: `wants_baseline=True` now routes file roots through `_scan_single_file` candidate collection instead of `_walk_and_collect` (which returned zero candidates for file paths).
+- **`_compute_baseline`**: threads `recognize_blake3_sidecar`, `below_threshold_single_file_counts_skipped`, and `strict_audit` for API consistency with `execute_scan`.
+
+## [v0.8.3] - 2026-07-02
+
+### Changed
+
+- **Unified release semver**: All release surfaces use `vX.Y.Z` — `pyproject.toml`, CHANGELOG, Git tags, PyPI, `workflow_dispatch` `version`, and Docker image tags (`:vX.Y.Z`). Bare `X.Y.Z` is rejected on Docker publish workflows.
+- **Publish workflows**: `publish-fors33-scanner` requires dispatch input `vX.Y.Z` and fails on bare semver.
+
+## [v0.8.2] - 2026-07-02
+
+### Added
+
+- **BagIt scan alignment** with L3dgr extension: shared `manifest_core` helpers; payload members under BagIt `data/` count as attested during directory walks.
+- **`is_epoch_upload_companion_basename`** in `hash_core` (epoch bundle companion skips).
+
+## [v0.8.1] - 2026-05-10
 
 ### Added
 
@@ -111,7 +132,7 @@ All notable changes to fors33-scanner are documented here.
 - When both `--emit-jsonl -` and `--json` are requested, JSONL stream takes precedence on `stdout`.
 - Depth calculation uses normalized cross-platform path handling for Windows/POSIX consistency.
 - Docker build flows moved to hardened multi-stage `python:3.13-alpine` model with pinned build tooling.
-- Publish workflow is manual `workflow_dispatch` only with explicit `version` and `push_latest` inputs.
+- Publish workflow is manual `workflow_dispatch` only with explicit `version` = `vX.Y.Z` and `push_latest` inputs (bare `X.Y.Z` rejected).
 
 ## [0.3.0] - 2026-03-10
 
