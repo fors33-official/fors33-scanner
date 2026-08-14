@@ -12,7 +12,7 @@ Structured reference for the Fors33 Liability Scanner open-source package: file 
 
 Positive `--workers` wins over `FORS33_WORKERS`; auto uses `default_dpk_worker_count()` and optional `FORS33_DPK_MAX_WORKERS` (cap 64). Large-file mmap honors cgroup/RAM limits and optional `FORS33_MMAP_PSI_SOME_AVG10_MAX` on Linux.
 
-**Single-file roots:** `execute_scan(..., wants_baseline=True)` on a file path emits baseline records (v0.8.4+).
+**Single-file roots:** `execute_scan(..., wants_baseline=True)` on a file path emits baseline records (v0.8.4+). Optional `should_cancel=` cooperative stop (v0.9.0+). Walks set `has_sidecar` on unverified samples when a skip-ext sibling did not confer attestation.
 
 **Backward-compatible stats:** `--legacy-scanner-stats` or `FORS33_SCANNER_LEGACY_STATS=1` restores pre-0.8.0 accounting.
 
@@ -25,4 +25,4 @@ file integrity, baseline, checksum, data gravity, attestation coverage, sidecar,
 - PyPI: https://pypi.org/project/fors33-scanner/
 - Products: https://fors33.com/products
 - Legal: https://fors33.com/legal
-- Docker: `docker run --rm docker.io/fors33/fors33-scanner:v0.8.4 --help`
+- Docker: `docker run --rm docker.io/fors33/fors33-scanner:v0.9.0 --help`

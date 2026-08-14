@@ -2,6 +2,18 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [v0.9.0] - 2026-08-14
+
+### Added
+
+- **Cooperative cancel**: optional `should_cancel=` on `scan_roots`, `execute_scan`, and walk/hash helpers; raises `ScanCancelled` (same padding as the L3dgr Stop path).
+- **`has_sidecar` walk wiring**: unverified samples set `has_sidecar` when a skip-ext sibling exists but did not confer attestation (for example `.blake3` with `recognize_blake3_sidecar=False`). `execute_scan` preserves the flag when merging walk rows.
+
+### Changed
+
+- **`--tsa-url` help**: `FORS33_TSA_URL` is for downstream seal tooling; the scanner does not request timestamps.
+- **PyPI authors**: `Fors33` (env names `FORS33_*` unchanged).
+
 ## [v0.8.4] - 2026-07-02
 
 ### Fixed

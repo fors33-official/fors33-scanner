@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fors33-scanner"
-version = "v0.8.4"
+version = "v0.9.0"
 description = "High-speed liability scanner for attested vs unattested data using .f33 sidecars."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
-authors = [{name = "FORS33"}]
+authors = [{name = "Fors33"}]
 keywords = ["scanner", "security", "data-provenance", "attestation", "compliance"]
 classifiers = [
     "Development Status :: 4 - Beta",

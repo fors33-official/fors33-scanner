@@ -53,6 +53,14 @@ except ImportError:  # pragma: no cover - flat layout
     )
 
 
+class ScanCancelled(RuntimeError):
+    """Operator cancelled an in-flight scan (cooperative stop)."""
+
+
+def _check_scan_cancel(should_cancel: Callable[[], bool] | None) -> None:
+    if should_cancel is not None and should_cancel():
+        raise ScanCancelled("Cancelled by operator")
+
 
 def _env_bool(key: str) -> bool:
     """Strict string-to-bool: True only for 1, true, yes, y; False otherwise."""
@@ -118,6 +126,15 @@ def _sidecar_suffix_tuples(
     if recognize_blake3_sidecar:
         external_exts = external_exts + (_BLAKE3_EXT,)
     return skip_exts, external_exts
+
+
+def _skip_ext_sidecar_present(
+    name: str,
+    filenames: set[str],
+    skip_exts: tuple[str, ...],
+) -> bool:
+    """True when a skip-ext sibling exists (UI hint; does not confer attestation)."""
+    return any(f"{name}{ext}" in filenames for ext in skip_exts)
 
 
 def _resolve_scanner_compat_kwargs(
@@ -332,6 +349,7 @@ def _scan_dir(
     max_depth: int | None = None,
     bagit_attested_relpaths: Set[str] | None = None,
     recognize_blake3_sidecar: bool = True,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> None:
     skip_exts, external_exts = _sidecar_suffix_tuples(recognize_blake3_sidecar)
     try:
@@ -361,6 +379,7 @@ def _scan_dir(
     }
 
     for entry in entries:
+        _check_scan_cancel(should_cancel)
         name = entry.name
         entry_path = entry.path
         if entry.is_dir(follow_symlinks=follow_symlinks):
@@ -385,6 +404,7 @@ def _scan_dir(
                 max_depth=max_depth,
                 bagit_attested_relpaths=bagit_attested_relpaths,
                 recognize_blake3_sidecar=recognize_blake3_sidecar,
+                should_cancel=should_cancel,
             )
         elif entry.is_file(follow_symlinks=follow_symlinks):
             stats.files_scanned += 1
@@ -452,7 +472,11 @@ def _scan_dir(
             else:
                 stats.unattested_files += 1
                 stats.unattested_bytes += size
-                stats.add_unverified_sample(rel_path, "UNSEALED")
+                stats.add_unverified_sample(
+                    rel_path,
+                    "UNSEALED",
+                    has_sidecar=_skip_ext_sidecar_present(name, filenames, skip_exts),
+                )
 
 
 def _scan_single_file(
@@ -552,7 +576,11 @@ def _scan_single_file(
     else:
         stats.unattested_files += 1
         stats.unattested_bytes += size
-        stats.add_unverified_sample(rel_path, "UNSEALED")
+        stats.add_unverified_sample(
+            rel_path,
+            "UNSEALED",
+            has_sidecar=_skip_ext_sidecar_present(name, filenames, skip_exts),
+        )
 
 
 def scan_roots(
@@ -567,6 +595,7 @@ def scan_roots(
     legacy_scanner_stats: bool = False,
     below_threshold_single_file_counts_skipped: bool = False,
     recognize_blake3_sidecar: bool = True,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> ScanStats:
     compat = _resolve_scanner_compat_kwargs(
         legacy_scanner_stats=legacy_scanner_stats,
@@ -584,6 +613,7 @@ def scan_roots(
     base_ignore_patterns: List[str] = list(ignore_patterns or [])
 
     for root in norm_roots:
+        _check_scan_cancel(should_cancel)
         root_patterns = base_ignore_patterns + _load_f33ignore_patterns(root)
         visited_dirs: Set[tuple[int, int]] = set()
         
@@ -617,6 +647,7 @@ def scan_roots(
                 max_depth=max_depth,
                 bagit_attested_relpaths=bagit_paths,
                 recognize_blake3_sidecar=recognize_blake3,
+                should_cancel=should_cancel,
             )
 
     stats.elapsed_seconds = time.time() - start
@@ -633,6 +664,7 @@ def _walk_and_collect(
     max_depth: int | None = None,
     *,
     recognize_blake3_sidecar: bool = True,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> tuple[ScanStats, List[tuple[str, str, int, float]]]:
     """
     Single directory walk that collects scan stats and candidate files for baseline.
@@ -651,6 +683,7 @@ def _walk_and_collect(
     walk_root = path_for_kernel(root_abs)
 
     for dirpath, dirnames, filenames in os.walk(walk_root, followlinks=follow_symlinks):
+        _check_scan_cancel(should_cancel)
         try:
             st_dir = os.stat(path_for_kernel(dirpath), follow_symlinks=False)
         except OSError as e:
@@ -735,7 +768,11 @@ def _walk_and_collect(
             else:
                 stats.unattested_files += 1
                 stats.unattested_bytes += size
-                stats.add_unverified_sample(norm_rel, "UNSEALED")
+                stats.add_unverified_sample(
+                    norm_rel,
+                    "UNSEALED",
+                    has_sidecar=_skip_ext_sidecar_present(name, filenames_set, skip_exts),
+                )
             candidates.append((norm_rel, full_path, size, st.st_mtime))
 
     stats.elapsed_seconds = time.time() - start
@@ -763,6 +800,7 @@ def _hash_candidates_multi(
     stats: ScanStats,
     progress_event_callback: Callable[[dict], None] | None = None,
     max_workers: int | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> List[Dict[str, object]]:
     """Hash candidate files (multi-root) and return baseline records; update stats.skipped_files and mutated_during_scan."""
     from concurrent.futures import ThreadPoolExecutor
@@ -771,6 +809,7 @@ def _hash_candidates_multi(
     effective_workers = resolve_dpk_worker_count(max_workers)
 
     def _worker(item: tuple[int, str, str, int, float]):
+        _check_scan_cancel(should_cancel)
         root_idx, rel, full_path, size, _mtime = item
         try:
             st_before = os.stat(path_for_kernel(full_path), follow_symlinks=follow_symlinks)
@@ -821,6 +860,7 @@ def _hash_candidates_multi(
         for root_idx, rel, size, mtime_final, digest, skipped, mutated in executor.map(
             _worker, candidates
         ):
+            _check_scan_cancel(should_cancel)
             if skipped:
                 stats.skipped_files += 1
                 continue
@@ -937,6 +977,7 @@ def execute_scan(
     legacy_scanner_stats: bool = False,
     below_threshold_single_file_counts_skipped: bool = False,
     recognize_blake3_sidecar: bool = True,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> tuple[ScanStats, List[Dict[str, object]]]:
     """
     Library entry point: scan roots and optionally compute baseline.
@@ -963,6 +1004,7 @@ def execute_scan(
         stats = ScanStats(roots=roots_abs)
         baseline_start = time.time()
         for root_idx, root in enumerate(roots_abs):
+            _check_scan_cancel(should_cancel)
             root_ignore = base_ignore + _load_f33ignore_patterns(root)
             if os.path.isfile(path_for_kernel(root)):
                 walk_stats = ScanStats(roots=[root])
@@ -989,6 +1031,7 @@ def execute_scan(
                     strict_audit=strict_audit,
                     max_depth=max_depth,
                     recognize_blake3_sidecar=recognize_blake3,
+                    should_cancel=should_cancel,
                 )
             stats.files_scanned += walk_stats.files_scanned
             stats.candidate_files += walk_stats.candidate_files
@@ -1003,7 +1046,11 @@ def execute_scan(
             stats.attested_external_bytes += walk_stats.attested_external_bytes
             stats.skipped_files += walk_stats.skipped_files
             for row in walk_stats.unverified_paths_sample:
-                stats.add_unverified_sample(row["path"], row.get("status", "UNSEALED"))
+                stats.add_unverified_sample(
+                    row["path"],
+                    row.get("status", "UNSEALED"),
+                    has_sidecar=str(row.get("has_sidecar", "false")).lower() == "true",
+                )
             for norm_rel, full_path, size, mtime in candidates:
                 all_candidates.append((root_idx, norm_rel, full_path, size, mtime))
         stats.elapsed_seconds = time.time() - baseline_start
@@ -1014,6 +1061,7 @@ def execute_scan(
             stats,
             progress_event_callback,
             max_workers=max_workers,
+            should_cancel=should_cancel,
         )
     else:
         stats = scan_roots(
@@ -1029,6 +1077,7 @@ def execute_scan(
                 "below_threshold_single_file_counts_skipped"
             ],
             recognize_blake3_sidecar=recognize_blake3,
+            should_cancel=should_cancel,
         )
         records = []
     return stats, records
@@ -1250,7 +1299,7 @@ def main() -> None:
         "--tsa-url",
         default=None,
         metavar="URL",
-        help="RFC 3161 TSA endpoint; sets FORS33_TSA_URL for seal-sidecar timestamp requests.",
+        help="Explicit RFC 3161 TSA endpoint override; sets FORS33_TSA_URL for downstream seal tooling. The scanner does not request timestamps.",
     )
     args = parser.parse_args()
 
