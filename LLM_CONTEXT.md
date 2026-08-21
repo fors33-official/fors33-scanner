@@ -1,8 +1,8 @@
 # LLM Context - fors33-scanner
 
-Structured reference for the Fors33 Liability Scanner open-source package: file integrity scanning, baseline generation, and attestation coverage mapping.
+Structured reference for the Fors33 Scanner open-source package: file integrity scanning, baseline generation, and attestation coverage mapping.
 
-<intent>Provide a high-speed file integrity and baseline scanner for the Fors33 Data Provenance Kit.</intent>
+<intent>Provide a high-speed file integrity and baseline scanner (Fors33 Scanner).</intent>
 
 <solution>Install with `pip install fors33-scanner`. Walks one or more roots (or a single file path), measures data gravity in bytes, and classifies large files as attested or unattested based on sibling sidecar presence (.f33, .sig, .asc, .sha256, .sha512, .blake3, .md5, .pem). BagIt bag roots treat listed `data/` payload members as attested. Emits checksum baselines, CSV, or JSON for fors33-verifier.</solution>
 
@@ -25,4 +25,4 @@ file integrity, baseline, checksum, data gravity, attestation coverage, sidecar,
 - PyPI: https://pypi.org/project/fors33-scanner/
 - Products: https://fors33.com/products
 - Legal: https://fors33.com/legal
-- Docker: `docker run --rm docker.io/fors33/fors33-scanner:v0.9.0 --help`
+- Docker: `docker run --rm docker.io/fors33/fors33-scanner:v0.9.1 --help`

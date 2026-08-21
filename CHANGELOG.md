@@ -2,6 +2,18 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [v0.9.1] - 2026-08-21
+
+### Added
+
+- **GitHub Action** docs in README (`uses: fors33-official/fors33-scanner@v0.9.1`). Scan on the runner; no file uploads to Fors33.
+
+### Changed
+
+- Action image pin: `ghcr.io/fors33-official/fors33-scanner:v0.9.1` (matches publish workflow GHCR org).
+- Operator-visible CLI banners, argparse, and Action name: **Fors33 Scanner**.
+- Human report `[REFERENCE]` is `fors33.com` only.
+
 ## [v0.9.0] - 2026-08-14
 
 ### Added

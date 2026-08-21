@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FORS33 Liability Scanner (open source)
+Fors33 Scanner (open source)
 
 High-speed, read-only scanner that walks one or more roots using os.scandir,
 measures "data gravity" (bytes) for large files, and classifies them as
@@ -153,7 +153,7 @@ def _resolve_scanner_compat_kwargs(
     }
 
 LEGAL_BANNER_LINES = (
-    "[LEGAL]  Fors33 Liability Scanner",
+    "[LEGAL]  Fors33 Scanner",
     "[LEGAL]  This scanner quantifies attestation coverage only.",
     "[LEGAL]  Verify results in your chain-of-custody workflow.",
     "[LEGAL]  Do not treat summary output as cryptographic proof.",
@@ -1170,7 +1170,7 @@ def print_human_report(stats: ScanStats, compliance_report: bool = False) -> Non
         "[REMEDIATION]   : Enforce deterministic attestation on exposed directories."
     )
     print(
-        "[REFERENCE]     : fors33.com | GitHub Marketplace: Fors33"
+        "[REFERENCE]     : fors33.com"
     )
 
 
@@ -1179,7 +1179,7 @@ def main() -> None:
         print(line, file=sys.stderr)
     parser = argparse.ArgumentParser(
         description=(
-            "Fors33 Liability Scanner: quantify attested vs unattested data bytes "
+            "Fors33 Scanner: quantify attested vs unattested data bytes "
             "using .f33 sidecars."
         )
     )
