@@ -1,9 +1,9 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
-[![Release](https://img.shields.io/badge/release-v0.9.1-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
+[![Release](https://img.shields.io/badge/release-v0.9.2-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
-[![Docker Tag](https://img.shields.io/badge/docker-v0.9.1%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
+[![Docker Tag](https://img.shields.io/badge/docker-v0.9.2%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![Docker Pulls](https://img.shields.io/docker/pulls/fors33/fors33-scanner?style=flat-square)](https://hub.docker.com/r/fors33/fors33-scanner)
 [![License](https://img.shields.io/github/license/fors33-official/fors33-scanner?style=flat-square)](https://github.com/fors33-official/fors33-scanner/blob/main/LICENSE)
 
@@ -17,6 +17,10 @@ For structured package context, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
 <details>
 <summary><strong>Release notes &amp; version history</strong></summary>
+
+### v0.9.2 (2026-09-02)
+
+- **Packaging:** PyPI and Docker Hub short description use Fors33 Scanner file-integrity wording (not "liability scanner").
 
 ### v0.9.1 (2026-08-21)
 
@@ -171,7 +175,7 @@ Use **Fors33 Scanner** on the runner. No file uploads to Fors33. Inputs match `a
 
 ```yaml
 - name: Scan coverage
-  uses: fors33-official/fors33-scanner@v0.9.1
+  uses: fors33-official/fors33-scanner@v0.9.2
   with:
     root: .
     json: 'true'
@@ -233,9 +237,9 @@ Published images:
 - GHCR (Action image pin): `ghcr.io/fors33-official/fors33-scanner`
 
 ```bash
-docker run --rm ghcr.io/fors33-official/fors33-scanner:v0.9.1 --root /data --threshold-mb 1.0
+docker run --rm ghcr.io/fors33-official/fors33-scanner:v0.9.2 --root /data --threshold-mb 1.0
 # or
-docker run --rm docker.io/fors33/fors33-scanner:v0.9.1 --root /data --json
+docker run --rm docker.io/fors33/fors33-scanner:v0.9.2 --root /data --json
 ```
 
 Published images include **SBOM** and **build provenance** metadata (expand **Release notes & version history** near the top of this README). Pin a **version tag** or **immutable digest** in production pipelines.

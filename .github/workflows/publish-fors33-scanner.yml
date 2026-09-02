@@ -94,5 +94,5 @@ jobs:
           repository: fors33/fors33-scanner
           readme-filepath: ./README.md
           enable-url-completion: true
-          short-description: High-speed liability scanner for attested vs unattested data using .f33 sidecars.
+          short-description: High-speed file integrity scanner for attested vs unattested data using .f33 sidecars.
 

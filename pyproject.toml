@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fors33-scanner"
-version = "v0.9.1"
-description = "High-speed liability scanner for attested vs unattested data using .f33 sidecars."
+version = "v0.9.2"
+description = "High-speed file integrity scanner for attested vs unattested data using .f33 sidecars."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"

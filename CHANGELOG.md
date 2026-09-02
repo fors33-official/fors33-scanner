@@ -2,6 +2,12 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [v0.9.2] - 2026-09-02
+
+### Changed
+
+- PyPI / Docker Hub short description: **Fors33 Scanner** file-integrity wording (drops "liability scanner" product phrasing). Package stamps stay `v0.9.2` on Git, CHANGELOG, Action pin, and Docker tags.
+
 ## [v0.9.1] - 2026-08-21
 
 ### Added

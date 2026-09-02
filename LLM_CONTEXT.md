@@ -25,4 +25,4 @@ file integrity, baseline, checksum, data gravity, attestation coverage, sidecar,
 - PyPI: https://pypi.org/project/fors33-scanner/
 - Products: https://fors33.com/products
 - Legal: https://fors33.com/legal
-- Docker: `docker run --rm docker.io/fors33/fors33-scanner:v0.9.1 --help`
+- Docker: `docker run --rm docker.io/fors33/fors33-scanner:v0.9.2 --help`
