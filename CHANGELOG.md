@@ -2,6 +2,13 @@
 
 All notable changes to fors33-scanner are documented here.
 
+## [v0.10.0] - 2026-09-06
+
+### Added
+
+- **`hash_file_algos`**: one disk pass updates every requested hasher; public `hash_file` remains a single-algo wrapper with the same signature.
+- **`execute_scan(..., include_sha256=False)`**: when true and `algo` is not sha256, baseline records gain `digest_sha256` (lowercase hex). Default CLI JSON, CSV, checksum, and jsonl output is unchanged. No CLI flag.
+
 ## [v0.9.2] - 2026-09-02
 
 ### Changed

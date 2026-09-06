@@ -28,7 +28,7 @@ from typing import Callable, Dict, Iterable, List, Set
 try:
     from .hash_core import (
         default_dpk_worker_count,
-        hash_file,
+        hash_file_algos,
         is_epoch_upload_companion_basename,
         path_for_kernel,
         path_from_kernel,
@@ -41,7 +41,7 @@ try:
 except ImportError:  # pragma: no cover - flat layout
     from hash_core import (
         default_dpk_worker_count,
-        hash_file,
+        hash_file_algos,
         is_epoch_upload_companion_basename,
         path_for_kernel,
         path_from_kernel,
@@ -785,11 +785,17 @@ def _hash_candidates(
     follow_symlinks: bool,
     stats: ScanStats,
     progress_event_callback: Callable[[dict], None] | None = None,
+    include_sha256: bool = False,
 ) -> List[Dict[str, object]]:
     """Hash candidate files (single root) and return baseline records."""
     root_indexed = [(0, rel, fp, sz, mt) for rel, fp, sz, mt in candidates]
     return _hash_candidates_multi(
-        root_indexed, algo, follow_symlinks, stats, progress_event_callback
+        root_indexed,
+        algo,
+        follow_symlinks,
+        stats,
+        progress_event_callback,
+        include_sha256=include_sha256,
     )
 
 
@@ -801,6 +807,7 @@ def _hash_candidates_multi(
     progress_event_callback: Callable[[dict], None] | None = None,
     max_workers: int | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    include_sha256: bool = False,
 ) -> List[Dict[str, object]]:
     """Hash candidate files (multi-root) and return baseline records; update stats.skipped_files and mutated_during_scan."""
     from concurrent.futures import ThreadPoolExecutor
@@ -839,7 +846,13 @@ def _hash_candidates_multi(
                             print(f"\r\033[K[SCAN] Hashing {rel}: {pct}%", end="", file=sys.stderr)
 
                 progress_cb = _progress
-            digest = hash_file(full_path, algo=algo, progress_callback=progress_cb)
+            algo_l = str(algo or "sha256").strip().lower() or "sha256"
+            want_algos = [algo_l]
+            if include_sha256 and algo_l != "sha256":
+                want_algos.append("sha256")
+            digests = hash_file_algos(full_path, want_algos, progress_callback=progress_cb)
+            digest = digests[algo_l]
+            digest_sha256 = digests.get("sha256") or (digest if algo_l == "sha256" else None)
             if progress_cb and sys.stderr.isatty():
                 print(file=sys.stderr)
             st_after = os.stat(path_for_kernel(full_path), follow_symlinks=follow_symlinks)
@@ -852,12 +865,12 @@ def _hash_candidates_multi(
             mtime_final = st_after.st_mtime
         except Exception as e:
             print(f"[ERROR] Unhandled worker exception: {e}", file=sys.stderr)
-            return (root_idx, rel, size, 0.0, None, True, False)
-        return (root_idx, rel, size, mtime_final, digest, False, mutated)
+            return (root_idx, rel, size, 0.0, None, None, True, False)
+        return (root_idx, rel, size, mtime_final, digest, digest_sha256, False, mutated)
 
     executor = ThreadPoolExecutor(max_workers=effective_workers)
     try:
-        for root_idx, rel, size, mtime_final, digest, skipped, mutated in executor.map(
+        for root_idx, rel, size, mtime_final, digest, digest_sha256, skipped, mutated in executor.map(
             _worker, candidates
         ):
             _check_scan_cancel(should_cancel)
@@ -867,17 +880,22 @@ def _hash_candidates_multi(
             if mutated:
                 stats.mutated_during_scan += 1
                 continue
-            records.append(
-                {
-                    "path": rel,
-                    "algo": algo,
-                    "digest": digest.lower(),
-                    "bytes": size,
-                    "mtime": int(mtime_final),
-                    "root_index": root_idx,
-                    "status": "baseline",
-                }
-            )
+            rec: Dict[str, object] = {
+                "path": rel,
+                "algo": algo,
+                "digest": str(digest or "").lower(),
+                "bytes": size,
+                "mtime": int(mtime_final),
+                "root_index": root_idx,
+                "status": "baseline",
+            }
+            if (
+                include_sha256
+                and str(algo or "sha256").strip().lower() != "sha256"
+                and digest_sha256
+            ):
+                rec["digest_sha256"] = str(digest_sha256).lower()
+            records.append(rec)
     except KeyboardInterrupt:
         executor.shutdown(wait=False, cancel_futures=True)
         sys.exit(130)
@@ -898,6 +916,7 @@ def _compute_baseline(
     recognize_blake3_sidecar: bool = True,
     below_threshold_single_file_counts_skipped: bool = False,
     strict_audit: bool = False,
+    include_sha256: bool = False,
 ) -> List[Dict[str, object]]:
     """
     Walk a single root and compute baseline records for all candidate files.
@@ -951,12 +970,22 @@ def _compute_baseline(
     if stats is not None:
         _merge_walk_stats(stats, walk_stats)
         return _hash_candidates(
-            candidates, algo, follow_symlinks, stats, progress_event_callback=None
+            candidates,
+            algo,
+            follow_symlinks,
+            stats,
+            progress_event_callback=None,
+            include_sha256=include_sha256,
         )
     stats_placeholder = ScanStats(roots=[root_abs])
     _merge_walk_stats(stats_placeholder, walk_stats)
     return _hash_candidates(
-        candidates, algo, follow_symlinks, stats_placeholder, progress_event_callback=None
+        candidates,
+        algo,
+        follow_symlinks,
+        stats_placeholder,
+        progress_event_callback=None,
+        include_sha256=include_sha256,
     )
 
 
@@ -978,6 +1007,7 @@ def execute_scan(
     below_threshold_single_file_counts_skipped: bool = False,
     recognize_blake3_sidecar: bool = True,
     should_cancel: Callable[[], bool] | None = None,
+    include_sha256: bool = False,
 ) -> tuple[ScanStats, List[Dict[str, object]]]:
     """
     Library entry point: scan roots and optionally compute baseline.
@@ -1062,6 +1092,7 @@ def execute_scan(
             progress_event_callback,
             max_workers=max_workers,
             should_cancel=should_cancel,
+            include_sha256=include_sha256,
         )
     else:
         stats = scan_roots(
