@@ -11,7 +11,7 @@ High-speed file integrity and baseline scanner. Walks one or more roots, measure
 
 **Trust model:** The scanner is an O(1) discovery and liability mapping tool based on sidecar presence only. It does not validate Ed25519 signatures or cryptographic proof of baselines. For full cryptographic verification, use fors33-verifier.
 
-> **Legal:** Fors33 Scanner quantifies attestation coverage only. It does not establish, guarantee, or certify regulatory compliance. See [DISCLAIMER.md](DISCLAIMER.md) and [full legal terms at fors33.com/legal](https://fors33.com/legal).
+> **Legal:** Fors33 Scanner quantifies attestation coverage only. It does not establish, guarantee, or certify regulatory compliance. See [DISCLAIMER.md](DISCLAIMER.md) and [full legal terms at fors33.com/legal](https://fors33.com/legal). Report security issues privately: [SECURITY.md](SECURITY.md).
 
 For structured package context, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
