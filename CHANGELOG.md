@@ -7,6 +7,7 @@ All notable changes to fors33-scanner are documented here.
 ### Changed
 
 - **`pyproject.toml` version** is PEP 440 bare `X.Y.Z` (now `0.10.0`). Git tags, `workflow_dispatch` `version`, Docker image tags, and GitHub Action pins stay `vX.Y.Z`.
+- **`publish-pypi` GitHub Release** attaches a CycloneDX JSON SBOM of the wheel (`sbom/fors33-scanner.cdx.json`, outside `dist/`) plus provenance and SBOM attestations.
 
 ## [v0.10.0] - 2026-09-06
 

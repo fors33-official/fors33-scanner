@@ -64,7 +64,7 @@ For structured package context, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 ### 0.7.1 (2026-05-10)
 
 - **`has_sidecar` on unverified samples**: `ScanStats.add_unverified_sample(..., *, has_sidecar=False)` records `"has_sidecar": "true"` or `"false"` on each sampled unattested path (same shape as the L3dgr extension) for downstream re-seal UX.
-- **Supply chain**: Docker images from `publish-fors33-scanner` attach **SBOM** and **SLSA provenance** (`sbom: true`, `provenance: mode=max`). Pin by digest for regulated deployments.
+- **Supply chain**: Docker images from `publish-fors33-scanner` attach **SBOM** and **SLSA provenance** (`sbom: true`, `provenance: mode=max`). Pin by digest for regulated deployments. The `publish-pypi` GitHub Release also attaches a CycloneDX JSON SBOM of the wheel.
 
 ### 0.7.0 (2026-05-01)
 
