@@ -1,6 +1,7 @@
 # fors33-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-fors33-scanner.yml?branch=main&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions)
+[![publish-pypi](https://img.shields.io/github/actions/workflow/status/fors33-official/fors33-scanner/publish-pypi.yml?label=publish-pypi&style=flat-square)](https://github.com/fors33-official/fors33-scanner/actions/workflows/publish-pypi.yml)
 [![Release](https://img.shields.io/badge/release-v0.10.1-blue?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![PyPI](https://img.shields.io/pypi/v/fors33-scanner?style=flat-square)](https://pypi.org/project/fors33-scanner/)
 [![Docker Tag](https://img.shields.io/badge/docker-v0.10.1%20%7C%20latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/fors33/fors33-scanner)
