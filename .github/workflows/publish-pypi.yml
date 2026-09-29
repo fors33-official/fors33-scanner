@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Git tag with leading v (example: v0.10.0). pyproject.toml is the same number without v. Bare X.Y.Z is rejected.'
+        description: 'Git tag with leading v (example: v0.10.1). pyproject.toml is the same number without v. Bare X.Y.Z is rejected.'
         required: true
         type: string
 
@@ -121,10 +121,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          cp "${{ steps.attest.outputs.bundle-path }}" sbom/attestation-provenance.json
+          cp "${{ steps.attest-sbom.outputs.bundle-path }}" sbom/attestation-sbom.json
           gh release create "${{ steps.meta.outputs.version }}" \
             dist/*.whl dist/*.tar.gz \
             sbom/fors33-scanner.cdx.json \
-            "${{ steps.attest.outputs.bundle-path }}" \
-            "${{ steps.attest-sbom.outputs.bundle-path }}" \
+            sbom/attestation-provenance.json \
+            sbom/attestation-sbom.json \
             --title "${{ steps.meta.outputs.version }}" \
             --notes "See CHANGELOG.md for this tag."
