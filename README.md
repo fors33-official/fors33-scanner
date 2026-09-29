@@ -80,7 +80,8 @@ For structured package context, see [LLM_CONTEXT.md](LLM_CONTEXT.md).
 
 ### Release model
 
-- Docker publish is **manual** via GitHub Actions **`workflow_dispatch`** with explicit **`version`** = `vX.Y.Z` (e.g. `v0.8.3`) and **`push_latest`**; bare `X.Y.Z` is **rejected**. It does **not** run automatically on git tags alone. PyPI releases use the same `vX.Y.Z` string in `pyproject.toml` (`python -m build`, `twine upload`).
+- Docker publish is **manual** via GitHub Actions workflow **`publish-fors33-scanner`** (`workflow_dispatch` with **`version`** = `vX.Y.Z` and **`push_latest`**). Bare `X.Y.Z` is **rejected**. It does **not** run automatically on git tags.
+- PyPI publish is **manual** via GitHub Actions workflow **`publish-pypi`** (`workflow_dispatch` with **`version`** = `vX.Y.Z`). The git tag `vX.Y.Z` must already exist on origin; the job checks out that tag and requires `pyproject.toml` to match. Bare `X.Y.Z` is **rejected**. It does **not** run automatically on git tags.
 
 </details>
 
